@@ -1,0 +1,10 @@
+{
+  "devDependencies": {
+    "elm-pages": "^3.0.7",
+    "elm-review": "^2.10.2"
+  },
+  "scripts": {
+    "start": "elm-pages run src/Main.elm"
+  },
+  "license": "BSD-3-Clause"
+}
