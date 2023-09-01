@@ -53,7 +53,7 @@ engine config =
                     )
                     importsTask
                 |> BackendTask.Extra.log Ansi.Color.Extra.gray
-                    "Local helper modules (only used ones)"
+                    "Imported local helper modules"
                     (String.join ", " << List.map (String.join "." << .moduleName))
 
         importsTask :
@@ -129,7 +129,7 @@ engine config =
 
         basicsBindings : String
         basicsBindings =
-            "codegen/Gen/Basics.elm"
+            moduleNameToGenPath [ "Basics" ]
     in
     BackendTask.map3
         (\flagFiles localHelperFiles imports ->
