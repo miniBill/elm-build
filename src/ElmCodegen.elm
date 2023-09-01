@@ -39,11 +39,21 @@ engine config =
                 |> BackendTask.andThen
                     (BackendTask.Extra.combineMap getModulesInDirectory)
                 |> BackendTask.map List.concat
+                |> BackendTask.map2
+                    (\imports ->
+                        List.filter
+                            (\localHelperFile ->
+                                List.any
+                                    (\import_ ->
+                                        import_.moduleName
+                                            == ("Gen" :: localHelperFile.moduleName)
+                                    )
+                                    imports
+                            )
+                    )
+                    importsTask
                 |> BackendTask.Extra.log Ansi.Color.Extra.gray
-                    "Local helper files"
-                    (String.join ", " << List.map .path)
-                |> BackendTask.Extra.log Ansi.Color.Extra.gray
-                    "Local helper modules"
+                    "Local helper modules (only used ones)"
                     (String.join ", " << List.map (String.join "." << .moduleName))
 
         importsTask :
@@ -51,26 +61,47 @@ engine config =
                 FatalError
                 (List { moduleName : List String })
         importsTask =
-            BackendTask.File.rawFile "codegen/Generate.elm"
-                |> BackendTask.allowFatal
-                |> BackendTask.map
-                    (\raw ->
-                        raw
-                            |> String.split "\n"
+            getModulesInDirectory "codegen"
+                |> BackendTask.andThen
+                    (\paths ->
+                        paths
                             |> List.filterMap
-                                (\line ->
-                                    if String.startsWith "import " line then
-                                        line
-                                            |> String.split " "
-                                            |> List.drop 1
-                                            |> List.head
-                                            |> Maybe.map
-                                                (\name ->
-                                                    { moduleName = String.split "." name }
-                                                )
+                                (\{ path } ->
+                                    if
+                                        String.startsWith "codegen/elm-stuff/" path
+                                            || String.startsWith "codegen/Gen/" path
+                                    then
+                                        Nothing
 
                                     else
-                                        Nothing
+                                        BackendTask.File.rawFile path
+                                            |> BackendTask.allowFatal
+                                            |> Just
+                                )
+                            |> BackendTask.combine
+                    )
+                |> BackendTask.map
+                    (\raws ->
+                        raws
+                            |> List.concatMap
+                                (\raw ->
+                                    raw
+                                        |> String.split "\n"
+                                        |> List.filterMap
+                                            (\line ->
+                                                if String.startsWith "import " line then
+                                                    line
+                                                        |> String.split " "
+                                                        |> List.drop 1
+                                                        |> List.head
+                                                        |> Maybe.map
+                                                            (\name ->
+                                                                { moduleName = String.split "." name }
+                                                            )
+
+                                                else
+                                                    Nothing
+                                            )
                                 )
                     )
 
@@ -95,23 +126,13 @@ engine config =
         runName : String
         runName =
             "elm_codegen_run"
+
+        basicsBindings : String
+        basicsBindings =
+            "codegen/Gen/Basics.elm"
     in
     BackendTask.map3
         (\flagFiles localHelperFiles imports ->
-            let
-                usefulHelperFiles : List { path : String, moduleName : List String }
-                usefulHelperFiles =
-                    List.filter
-                        (\localHelperFile ->
-                            List.any
-                                (\import_ ->
-                                    import_.moduleName
-                                        == ("Gen" :: localHelperFile.moduleName)
-                                )
-                                imports
-                        )
-                        localHelperFiles
-            in
             [ Pool
                 { name = installName
                 , depth = 1
@@ -124,11 +145,12 @@ engine config =
                 }
             , Build
                 { rule = installName
-                , inputs = List.map .path usefulHelperFiles
+                , inputs = List.map .path localHelperFiles
                 , outputs =
-                    List.map
-                        (\{ moduleName } -> moduleNameToGenPath moduleName)
-                        usefulHelperFiles
+                    basicsBindings
+                        :: List.map
+                            (\{ moduleName } -> moduleNameToGenPath moduleName)
+                            localHelperFiles
                 }
             , Pool
                 { name = runName
@@ -156,7 +178,7 @@ engine config =
                 }
             , Build
                 { rule = runName
-                , inputs = flagFiles ++ List.filterMap importToPath imports
+                , inputs = basicsBindings :: flagFiles ++ List.filterMap importToPath imports
                 , outputs = config.outputs
                 }
             ]
