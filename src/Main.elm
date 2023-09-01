@@ -74,9 +74,9 @@ toNinjafile rules =
 toNinjaBlock : Block -> String
 toNinjaBlock block =
     let
-        blockToString : String -> List ( String, Maybe String ) -> String
-        blockToString name lines =
-            (name
+        blockToString : String -> String -> List ( String, Maybe String ) -> String
+        blockToString kind name lines =
+            ((kind ++ " " ++ name)
                 :: List.filterMap
                     (\( key, value ) ->
                         Maybe.map (\v -> key ++ " = " ++ v) value
@@ -91,7 +91,8 @@ toNinjaBlock block =
     in
     case block of
         Pool { name, depth } ->
-            blockToString ("pool " ++ name)
+            blockToString "pool"
+                name
                 [ ( "depth"
                   , depth
                         |> String.fromInt
@@ -100,7 +101,8 @@ toNinjaBlock block =
                 ]
 
         Rule { name, commands, pool } ->
-            blockToString ("rule " ++ name)
+            blockToString "rule"
+                name
                 [ ( "command"
                   , commands
                         |> List.map commandToString
@@ -111,14 +113,15 @@ toNinjaBlock block =
                 ]
 
         Build { rule, inputs, outputs } ->
-            blockToString
-                ("build "
-                    ++ commandToString outputs
-                    ++ ": "
-                    ++ rule
-                    ++ " "
-                    ++ commandToString inputs
-                )
+            let
+                line : List String
+                line =
+                    List.map escape outputs
+                        ++ [ ":", rule ]
+                        ++ List.map escape inputs
+            in
+            blockToString "build"
+                (String.join " " line)
                 []
 
 
