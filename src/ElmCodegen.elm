@@ -118,8 +118,9 @@ engine config =
                 }
             , Rule
                 { name = installName
+                , commands =
+                    [ [ "yarn", "elm-codegen", "install" ] ]
                 , pool = Just installName
-                , commands = [ [ "yarn", "elm-codegen", "install" ] ]
                 }
             , Build
                 { rule = installName
@@ -148,15 +149,8 @@ engine config =
                                 Nothing ->
                                     []
                     in
-                    [ [ "yarn"
-                      , "elm-codegen"
-                      , "run"
-                      ]
-                        ++ maybeFlags
-                    , [ "elm-format"
-                      , "--yes"
-                      , "generated"
-                      ]
+                    [ [ "yarn", "elm-codegen", "run" ] ++ maybeFlags
+                    , [ "elm-format", "--yes", "generated" ]
                     ]
                 , pool = Just runName
                 }
