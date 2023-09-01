@@ -67,36 +67,59 @@ toNinjafile : List Block -> String
 toNinjafile rules =
     rules
         |> List.map toNinjaBlock
-        |> (\l -> l ++ [ "default generated/Fonts.elm" ])
+        -- |> (\l -> l ++ [ "default generated/Fonts.elm" ])
         |> String.join "\n\n"
 
 
 toNinjaBlock : Block -> String
 toNinjaBlock block =
-    case block of
-        Pool { name, depth } ->
-            "pool " ++ name ++ "\n  depth = " ++ String.fromInt depth
-
-        Rule { name, commands, pool } ->
-            let
-                commandToString : Command -> String
-                commandToString command =
-                    String.join " " (List.map escape command)
-            in
-            [ Just <| "rule " ++ name
-            , Just <| "command = " ++ String.join " && " (List.map commandToString commands)
-            , Maybe.map (\poolName -> "pool = " ++ poolName) pool
-            ]
-                |> List.filterMap identity
+    let
+        blockToString : String -> List ( String, Maybe String ) -> String
+        blockToString name lines =
+            (name
+                :: List.filterMap
+                    (\( key, value ) ->
+                        Maybe.map (\v -> key ++ " = " ++ v) value
+                    )
+                    lines
+            )
                 |> String.join "\n  "
 
+        commandToString : Command -> String
+        commandToString command =
+            String.join " " (List.map escape command)
+    in
+    case block of
+        Pool { name, depth } ->
+            blockToString ("pool " ++ name)
+                [ ( "depth"
+                  , depth
+                        |> String.fromInt
+                        |> Just
+                  )
+                ]
+
+        Rule { name, commands, pool } ->
+            blockToString ("rule " ++ name)
+                [ ( "command"
+                  , commands
+                        |> List.map commandToString
+                        |> String.join " && "
+                        |> Just
+                  )
+                , ( "pool", pool )
+                ]
+
         Build { rule, inputs, outputs } ->
-            "build "
-                ++ String.join " " (List.map escape outputs)
-                ++ ": "
-                ++ rule
-                ++ " "
-                ++ String.join " " (List.map escape inputs)
+            blockToString
+                ("build "
+                    ++ commandToString outputs
+                    ++ ": "
+                    ++ rule
+                    ++ " "
+                    ++ commandToString inputs
+                )
+                []
 
 
 escape : String -> String
