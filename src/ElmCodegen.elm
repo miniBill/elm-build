@@ -56,13 +56,10 @@ engine config =
                     "Imported local helper modules"
                     (String.join ", " << List.map (String.join "." << .moduleName))
 
-        importsTask :
-            BackendTask
-                FatalError
-                (List { moduleName : List String })
-        importsTask =
+        codegenFilesTask : BackendTask FatalError (List String)
+        codegenFilesTask =
             getModulesInDirectory "codegen"
-                |> BackendTask.andThen
+                |> BackendTask.map
                     (\paths ->
                         paths
                             |> List.filterMap
@@ -74,9 +71,24 @@ engine config =
                                         Nothing
 
                                     else
-                                        BackendTask.File.rawFile path
-                                            |> BackendTask.allowFatal
-                                            |> Just
+                                        Just path
+                                )
+                    )
+
+        importsTask :
+            BackendTask
+                FatalError
+                (List { moduleName : List String })
+        importsTask =
+            codegenFilesTask
+                |> BackendTask.andThen
+                    (\paths ->
+                        paths
+                            |> List.map
+                                (\path ->
+                                    path
+                                        |> BackendTask.File.rawFile
+                                        |> BackendTask.allowFatal
                                 )
                             |> BackendTask.combine
                     )
@@ -131,8 +143,8 @@ engine config =
         basicsBindings =
             moduleNameToGenPath [ "Basics" ]
     in
-    BackendTask.map3
-        (\flagFiles localHelperFiles imports ->
+    BackendTask.map4
+        (\flagFiles localHelperFiles imports codegenFiles ->
             [ Pool
                 { name = installName
                 , depth = 1
@@ -178,7 +190,7 @@ engine config =
                 }
             , Build
                 { rule = runName
-                , inputs = basicsBindings :: flagFiles ++ List.filterMap importToPath imports
+                , inputs = basicsBindings :: flagFiles ++ codegenFiles ++ List.filterMap importToPath imports
                 , outputs = config.outputs
                 }
             ]
@@ -186,6 +198,7 @@ engine config =
         flagFilesTask
         localHelperFilesTask
         importsTask
+        codegenFilesTask
         |> Engine
 
 
