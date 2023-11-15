@@ -67,7 +67,6 @@ toNinjafile : List Block -> String
 toNinjafile rules =
     rules
         |> List.map toNinjaBlock
-        -- |> (\l -> l ++ [ "default generated/Fonts.elm" ])
         |> String.join "\n\n"
 
 
