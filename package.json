@@ -1,7 +1,8 @@
 {
   "devDependencies": {
     "elm-pages": "^3.0.7",
-    "elm-review": "^2.10.2"
+    "elm-review": "^2.10.2",
+    "elm-watch": "^1.1.2"
   },
   "scripts": {
     "start": "elm-pages run src/Main.elm"

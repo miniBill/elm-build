@@ -1040,6 +1040,16 @@ elm-tooling@^1.6.0:
   resolved "https://registry.yarnpkg.com/elm-tooling/-/elm-tooling-1.14.0.tgz#cffe2e3f582e17e50f4bac961588ae92846484c3"
   integrity sha512-cIbK3gfYWK086HsqOIGM4reIYcV/FF2R/8jIJ6ZUy1/RSkYFUv2BgPTGYYZo1Io9oymmbwoCWWleNtw7LgGL2w==
 
+elm-watch@^1.1.2:
+  version "1.1.2"
+  resolved "https://registry.yarnpkg.com/elm-watch/-/elm-watch-1.1.2.tgz#449bccab3bb8ed9619c6e597d735ce55b517446b"
+  integrity sha512-4Suh4fh6iep1T4Hb/LRetVcvFBvNOmyeLy1lFbuog7baNE2yUTxWwdPVTe4d9fkZ5hQCHdy2Ddy2BYWPB0dXYg==
+  dependencies:
+    chokidar "^3.5.3"
+    cross-spawn "^7.0.3"
+    tiny-decoders "^7.0.1"
+    ws "^8.12.0"
+
 emoji-regex@^8.0.0:
   version "8.0.0"
   resolved "https://registry.yarnpkg.com/emoji-regex/-/emoji-regex-8.0.0.tgz#e818fd69ce5ccfcb404594f842963bf53164cc37"
@@ -2687,6 +2697,11 @@ terser@^5.17.1:
     commander "^2.20.0"
     source-map-support "~0.5.20"
 
+tiny-decoders@^7.0.1:
+  version "7.0.1"
+  resolved "https://registry.yarnpkg.com/tiny-decoders/-/tiny-decoders-7.0.1.tgz#ce80d377a214a5c46ffdd37b3b14f64e91215210"
+  integrity sha512-P1LaHTLASl/lCrdtwgAAVwxt4bEAPmxpf9HMQrlCkAseaT8oH8oxm8ndy4nx5rLTcL5U/Qxp1a+FDoQfS/ZgQQ==
+
 tmp@0.1.0:
   version "0.1.0"
   resolved "https://registry.yarnpkg.com/tmp/-/tmp-0.1.0.tgz#ee434a4e22543082e294ba6201dcc6eafefa2877"
@@ -2857,6 +2872,11 @@ ws@^7.2.3:
   version "7.5.9"
   resolved "https://registry.yarnpkg.com/ws/-/ws-7.5.9.tgz#54fa7db29f4c7cec68b1ddd3a89de099942bb591"
   integrity sha512-F+P9Jil7UiSKSkppIiD94dN07AwvFixvLIj1Og1Rl9GGMuNipJnV9JzjD6XuqmAeiswGvUmNLjr5cFuXwNS77Q==
+
+ws@^8.12.0:
+  version "8.14.2"
+  resolved "https://registry.yarnpkg.com/ws/-/ws-8.14.2.tgz#6c249a806eb2db7a20d26d51e7709eab7b2e6c7f"
+  integrity sha512-wEBG1ftX4jcglPxgFCMJmZ2PLtSbJ2Peg6TmpJFTbe9GZYOQCDPdMYu/Tm0/bGZkw8paZnJY45J4K2PZrLYq8g==
 
 yallist@^4.0.0:
   version "4.0.0"
