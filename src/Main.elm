@@ -1,22 +1,27 @@
 port module Main exposing (main, run)
 
-import Ansi.Color as Color
+import Ansi.Color as Ansi
 import BackendTask
 import BackendTask.Extra
+import BuildTypes exposing (Block(..), Command, Engine(..))
 import Cli.OptionsParser as OptionsParser
 import Cli.Program as Program
 import ElmCodegen
+import Iso8601
 import Json.Decode as JD exposing (Decoder, Value)
 import Pages.Script as Script exposing (Script)
 import Process
 import Task
-import Types exposing (Block(..), Command, Engine(..))
+import Time
 
 
-port die : Int -> Cmd msg
+port chokidarWatch : String -> Cmd msg
 
 
 port log : String -> Cmd msg
+
+
+port die : { message : String, exitCode : Int } -> Cmd msg
 
 
 port chokidar : (Value -> msg) -> Sub msg
@@ -27,26 +32,66 @@ type alias Flags =
 
 
 type Model
-    = Model
-    | Dead
+    = Initial
+    | SettingUpChokidar { lastEvent : Time.Posix }
+    | Idle
 
 
 type Msg
-    = Die Int
+    = WithoutTime InnerMsg
+    | WithTime InnerMsg Time.Posix
+
+
+type InnerMsg
+    = Now
     | Chokidar Value
 
 
-type alias ChokidarData =
-    { event : Value
-    , data : Value
+type alias Event =
+    { path : String
+    , data : EventData
     }
 
 
-chokidarDataDecoder : Decoder ChokidarData
+type EventData
+    = Add { hash : String }
+    | AddDir
+    | Change { hash : String }
+    | Unlink
+    | UnlinkDir
+
+
+chokidarDataDecoder : Decoder Event
 chokidarDataDecoder =
-    JD.map2 ChokidarData
-        (JD.field "event" JD.value)
-        (JD.field "data" JD.value)
+    let
+        withHash ctor =
+            JD.map (\hash -> ctor { hash = hash }) (JD.field "hash" JD.string)
+    in
+    JD.map2 Event
+        (JD.field "path" JD.string)
+        (JD.field "eventName" JD.string
+            |> JD.andThen
+                (\eventName ->
+                    case eventName of
+                        "add" ->
+                            withHash Add
+
+                        "change" ->
+                            withHash Change
+
+                        "unlink" ->
+                            JD.succeed Unlink
+
+                        "addDir" ->
+                            JD.succeed AddDir
+
+                        "unlinkDir" ->
+                            JD.succeed UnlinkDir
+
+                        _ ->
+                            JD.fail <| "Unexpected event name: " ++ eventName
+                )
+        )
 
 
 main : Program Flags Model Msg
@@ -60,30 +105,101 @@ main =
 
 init : Flags -> ( Model, Cmd Msg )
 init _ =
-    ( Model
-    , Process.sleep 100
-        |> Task.perform (\_ -> Die 0)
+    ( Initial
+    , Cmd.batch
+        [ Task.perform (WithTime Now) Time.now
+        , info "Starting"
+        ]
     )
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
-    case msg of
-        Die code ->
-            ( Dead, die code )
+    case ( msg, model ) of
+        ( WithoutTime inner, _ ) ->
+            ( model, Task.perform (WithTime inner) Time.now )
 
-        Chokidar data ->
-            ( model, Cmd.none )
+        ( WithTime Now now, Initial ) ->
+            ( SettingUpChokidar { lastEvent = now }
+            , Cmd.batch
+                [ chokidarWatch "public"
+                , tickAfter 30
+                ]
+            )
+
+        ( WithTime (Chokidar data) now, SettingUpChokidar _ ) ->
+            decodeOrDie chokidarDataDecoder data model <|
+                \{ path } ->
+                    ( SettingUpChokidar { lastEvent = now }, debug <| "Watching " ++ path )
+
+        ( WithTime Now now, SettingUpChokidar { lastEvent } ) ->
+            if Time.posixToMillis now - Time.posixToMillis lastEvent > 30 then
+                ( Idle, info "Ready" )
+
+            else
+                ( SettingUpChokidar { lastEvent = now }, tickAfter 30 )
+
+        ( WithTime (Chokidar data) now, Idle ) ->
+            decodeOrDie chokidarDataDecoder data model <|
+                \decoded ->
+                    ( model
+                    , debug <|
+                        Debug.toString
+                            { path = decoded.path
+                            , data = decoded.data
+                            , now = Iso8601.fromTime now
+                            }
+                    )
+
+        _ ->
+            ( model, die { message = "Unexpected message", exitCode = 1 } )
+
+
+decodeOrDie : Decoder a -> Value -> Model -> (a -> ( Model, Cmd Msg )) -> ( Model, Cmd Msg )
+decodeOrDie decoder value model cont =
+    case JD.decodeValue decoder value of
+        Err e ->
+            ( model
+            , die
+                { message = "Decoding failed: " ++ JD.errorToString e
+                , exitCode = 1
+                }
+            )
+
+        Ok v ->
+            cont v
+
+
+info : String -> Cmd Msg
+info message =
+    log (Ansi.fontColor Ansi.cyan "info  " ++ message)
+
+
+debug : String -> Cmd Msg
+debug message =
+    log (Ansi.fontColor Ansi.brightBlack "debug " ++ message)
+
+
+tickAfter : Float -> Cmd Msg
+tickAfter delay =
+    Task.perform (\_ -> WithoutTime Now) (Process.sleep delay)
 
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
-    case model of
-        Model ->
-            chokidar Chokidar
+    Sub.map WithoutTime <|
+        Sub.batch
+            [ case model of
+                Initial ->
+                    Sub.none
 
-        Dead ->
-            Sub.none
+                SettingUpChokidar _ ->
+                    Sub.none
+
+                Idle ->
+                    Sub.none
+            , chokidar Chokidar
+            ]
 
 
 config :
@@ -116,7 +232,7 @@ run =
     Script.withCliOptions program
         (\_ ->
             BackendTask.Extra.pwd
-                |> BackendTask.Extra.log Color.cyan "Current directory" (Maybe.withDefault "unknown")
+                |> BackendTask.Extra.log Ansi.cyan "Current directory" (Maybe.withDefault "unknown")
                 |> BackendTask.andThen
                     (\_ ->
                         BackendTask.Extra.combineMap
@@ -134,7 +250,7 @@ run =
                     )
                 |> BackendTask.andThen
                     (\_ ->
-                        Script.log (Color.fontColor Color.brightGreen "Written build.ninja")
+                        Script.log (Ansi.fontColor Ansi.brightGreen "Written build.ninja")
                     )
         )
 

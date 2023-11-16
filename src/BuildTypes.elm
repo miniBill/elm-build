@@ -1,4 +1,4 @@
-module Types exposing (Block(..), Command, Engine(..))
+module BuildTypes exposing (Block(..), Command, Engine(..))
 
 import BackendTask exposing (BackendTask)
 import FatalError exposing (FatalError)

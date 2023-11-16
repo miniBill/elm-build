@@ -5,9 +5,9 @@ import BackendTask exposing (BackendTask)
 import BackendTask.Extra
 import BackendTask.File
 import BackendTask.Glob as Glob exposing (Glob)
+import BuildTypes exposing (Block(..), Engine(..))
 import FatalError exposing (FatalError)
 import Json.Decode as Decode
-import Types exposing (Block(..), Engine(..))
 
 
 engine :

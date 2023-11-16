@@ -1,0 +1,3 @@
+[submodule "elm-interpreter"]
+	path = elm-interpreter
+	url = https://github.com/miniBill/elm-interpreter
