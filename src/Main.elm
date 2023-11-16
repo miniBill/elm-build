@@ -1,4 +1,4 @@
-module Main exposing (run)
+port module Main exposing (main, run)
 
 import Ansi.Color as Color
 import BackendTask
@@ -6,8 +6,84 @@ import BackendTask.Extra
 import Cli.OptionsParser as OptionsParser
 import Cli.Program as Program
 import ElmCodegen
+import Json.Decode as JD exposing (Decoder, Value)
 import Pages.Script as Script exposing (Script)
+import Process
+import Task
 import Types exposing (Block(..), Command, Engine(..))
+
+
+port die : Int -> Cmd msg
+
+
+port log : String -> Cmd msg
+
+
+port chokidar : (Value -> msg) -> Sub msg
+
+
+type alias Flags =
+    List String
+
+
+type Model
+    = Model
+    | Dead
+
+
+type Msg
+    = Die Int
+    | Chokidar Value
+
+
+type alias ChokidarData =
+    { event : Value
+    , data : Value
+    }
+
+
+chokidarDataDecoder : Decoder ChokidarData
+chokidarDataDecoder =
+    JD.map2 ChokidarData
+        (JD.field "event" JD.value)
+        (JD.field "data" JD.value)
+
+
+main : Program Flags Model Msg
+main =
+    Platform.worker
+        { init = init
+        , update = update
+        , subscriptions = subscriptions
+        }
+
+
+init : Flags -> ( Model, Cmd Msg )
+init _ =
+    ( Model
+    , Process.sleep 100
+        |> Task.perform (\_ -> Die 0)
+    )
+
+
+update : Msg -> Model -> ( Model, Cmd Msg )
+update msg model =
+    case msg of
+        Die code ->
+            ( Dead, die code )
+
+        Chokidar data ->
+            ( model, Cmd.none )
+
+
+subscriptions : Model -> Sub Msg
+subscriptions model =
+    case model of
+        Model ->
+            chokidar Chokidar
+
+        Dead ->
+            Sub.none
 
 
 config :
