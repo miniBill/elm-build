@@ -1,6 +1,8 @@
-module Rule exposing (Path, Rule, RuleGenerator, TrackingTask, batch, combineMap, do, getFiles, getMTime, getRule, getRules, getSize, getTask, map, map2, writeFile)
+module Rule exposing (Path, Rule, RuleGenerator, TrackingTask, batch, combineMap, do, getFiles, getMTime, getRule, getRules, getSize, getTask, map, map2, writeCodegenFile, writeFile)
 
 import ConcurrentTask exposing (ConcurrentTask)
+import Elm
+import Elm.Syntax.ModuleName
 import Json.Decode as JD
 import Json.Encode as JE
 import Time
@@ -54,14 +56,7 @@ getFiles path =
         |> TrackingTask [ path ]
 
 
-writeFile :
-    Path
-    -> TrackingTask String
-    ->
-        { inputs : List Path
-        , outputs : List Path
-        , task : ConcurrentTask e ()
-        }
+writeFile : Path -> TrackingTask String -> Rule
 writeFile path (TrackingTask inputs task) =
     { inputs = inputs
     , outputs = [ path ]
@@ -82,6 +77,16 @@ writeFile path (TrackingTask inputs task) =
                         |> ConcurrentTask.define
                 )
     }
+
+
+writeCodegenFile : Elm.Syntax.ModuleName.ModuleName -> TrackingTask (List Elm.Declaration) -> Rule
+writeCodegenFile moduleName (TrackingTask inputs task) =
+    task
+        |> ConcurrentTask.map
+            (\declarations -> (Elm.file moduleName declarations).path)
+        |> TrackingTask inputs
+        |> writeFile
+            (String.join "/" ("generated" :: moduleName) ++ ".elm")
 
 
 getMTime : Path -> TrackingTask (Maybe Time.Posix)

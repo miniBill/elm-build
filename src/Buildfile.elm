@@ -1,7 +1,7 @@
 module Buildfile exposing (build)
 
+import Elm
 import Rule exposing (RuleGenerator)
-import String.Multiline
 
 
 build : List RuleGenerator
@@ -18,24 +18,18 @@ build =
                         )
                     |> Rule.map
                         (\imagesWithSizes ->
-                            String.Multiline.here
-                                """
-                                    module Images exposing (a)
-                                    a=0
-                                    {-
-                                    """
-                                ++ String.join "\n"
-                                    (List.map
-                                        (\( image, size ) ->
-                                            image ++ ": " ++ Maybe.withDefault "?" (Maybe.map String.fromInt size) ++ " bytes"
-                                        )
-                                        imagesWithSizes
+                            imagesWithSizes
+                                |> List.map
+                                    (\( image, size ) ->
+                                        Elm.declaration image <|
+                                            Elm.string <|
+                                                image
+                                                    ++ ": "
+                                                    ++ Maybe.withDefault "?"
+                                                        (Maybe.map String.fromInt size)
                                     )
-                                ++ String.Multiline.here """
-                                    -}
-                                    """
                         )
-                    |> Rule.writeFile "generated/Images.elm"
+                    |> Rule.writeCodegenFile [ "Images" ]
             )
     ]
 
