@@ -1,8 +1,7 @@
-module Rule exposing (Path, Rule, RuleGenerator, TrackingTask, batch, combineMap, do, getFiles, getMTime, getRule, getRules, getSize, getTask, map, map2, writeCodegenFile, writeFile)
+module Rule exposing (Path, Rule, TrackingTask, andThen, batch, combineMap, do, getFiles, getMTime, getSize, map, map2, toConcurrentTask, writeCodegenFile, writeFile)
 
 import ConcurrentTask exposing (ConcurrentTask)
 import Elm
-import Elm.Syntax.ModuleName
 import Json.Decode as JD
 import Json.Encode as JE
 import Time
@@ -19,30 +18,27 @@ type alias Rule =
     }
 
 
-type alias RuleGenerator =
-    TrackingTask Rule
+type alias Action =
+    { outputs : List Path
+    , task : ConcurrentTask Never ()
+    }
 
 
-do : (a -> Rule) -> TrackingTask a -> RuleGenerator
-do f (TrackingTask inputs task) =
-    TrackingTask inputs (ConcurrentTask.map f task)
-
-
-getRules : List RuleGenerator -> ConcurrentTask e (List Rule)
-getRules generators =
-    ConcurrentTask.batch (List.map getRule generators)
-
-
-getRule : RuleGenerator -> ConcurrentTask e Rule
-getRule (TrackingTask inputs toRule) =
-    toRule
-        |> ConcurrentTask.mapError never
-        |> ConcurrentTask.map
-            (\rule ->
-                { rule
-                    | inputs = inputs ++ rule.inputs
-                }
-            )
+do : (a -> Action) -> TrackingTask a -> ConcurrentTask e Rule
+do f (TrackingTask task) =
+    ConcurrentTask.map
+        (\( inputs, a ) ->
+            let
+                fa : Action
+                fa =
+                    f a
+            in
+            { inputs = inputs
+            , outputs = fa.outputs
+            , task = fa.task
+            }
+        )
+        (ConcurrentTask.onError never task)
 
 
 getFiles : Path -> TrackingTask (List Path)
@@ -53,40 +49,32 @@ getFiles path =
     , args = JE.string path
     }
         |> ConcurrentTask.define
-        |> TrackingTask [ path ]
+        |> ConcurrentTask.map (\v -> ( [ path ], v ))
+        |> TrackingTask
 
 
-writeFile : Path -> TrackingTask String -> Rule
-writeFile path (TrackingTask inputs task) =
-    { inputs = inputs
-    , outputs = [ path ]
+writeFile : Path -> String -> Action
+writeFile path content =
+    { outputs = [ path ]
     , task =
-        task
-            |> ConcurrentTask.mapError never
-            |> ConcurrentTask.andThen
-                (\content ->
-                    { function = "writeFile"
-                    , expect = ConcurrentTask.expectWhatever
-                    , errors = ConcurrentTask.expectNoErrors
-                    , args =
-                        JE.object
-                            [ ( "path", JE.string path )
-                            , ( "content", JE.string content )
-                            ]
-                    }
-                        |> ConcurrentTask.define
-                )
+        { function = "writeFile"
+        , expect = ConcurrentTask.expectWhatever
+        , errors = ConcurrentTask.expectNoErrors
+        , args =
+            JE.object
+                [ ( "path", JE.string path )
+                , ( "content", JE.string content )
+                ]
+        }
+            |> ConcurrentTask.define
     }
 
 
-writeCodegenFile : Elm.Syntax.ModuleName.ModuleName -> TrackingTask (List Elm.Declaration) -> Rule
-writeCodegenFile moduleName (TrackingTask inputs task) =
-    task
-        |> ConcurrentTask.map
-            (\declarations -> (Elm.file moduleName declarations).path)
-        |> TrackingTask inputs
-        |> writeFile
-            (String.join "/" ("generated" :: moduleName) ++ ".elm")
+writeCodegenFile : Elm.File -> Action
+writeCodegenFile file =
+    writeFile
+        ("generated/" ++ file.path)
+        file.contents
 
 
 getMTime : Path -> TrackingTask (Maybe Time.Posix)
@@ -107,13 +95,14 @@ type alias Stat =
 
 stat : String -> TrackingTask (Maybe Stat)
 stat path =
-    TrackingTask [ path ]
+    TrackingTask
         ({ function = "stat"
          , expect = ConcurrentTask.expectJson (JD.nullable statDecoder)
          , errors = ConcurrentTask.expectNoErrors
          , args = JE.string path
          }
             |> ConcurrentTask.define
+            |> ConcurrentTask.map (\res -> ( [ path ], res ))
         )
 
 
@@ -129,22 +118,49 @@ statDecoder =
 
 
 type TrackingTask a
-    = TrackingTask (List Path) (ConcurrentTask Never a)
+    = TrackingTask (ConcurrentTask Never ( List Path, a ))
 
 
 succeed : a -> TrackingTask a
 succeed value =
-    TrackingTask [] (ConcurrentTask.succeed value)
+    TrackingTask (ConcurrentTask.succeed ( [], value ))
 
 
 map : (a -> b) -> TrackingTask a -> TrackingTask b
-map f (TrackingTask inputs task) =
-    TrackingTask inputs (ConcurrentTask.map f task)
+map f (TrackingTask task) =
+    TrackingTask (ConcurrentTask.map (\( inputs, x ) -> ( inputs, f x )) task)
 
 
 map2 : (a -> b -> c) -> TrackingTask a -> TrackingTask b -> TrackingTask c
-map2 f (TrackingTask linputs ltask) (TrackingTask rinputs rtask) =
-    TrackingTask (linputs ++ rinputs) (ConcurrentTask.map2 f ltask rtask)
+map2 f (TrackingTask ltask) (TrackingTask rtask) =
+    TrackingTask
+        (ConcurrentTask.map2
+            (\( linputs, lx ) ( rinputs, rx ) ->
+                ( linputs ++ rinputs, f lx rx )
+            )
+            ltask
+            rtask
+        )
+
+
+andThen : (a -> TrackingTask b) -> TrackingTask a -> TrackingTask b
+andThen f (TrackingTask task) =
+    task
+        |> ConcurrentTask.andThen
+            (\( xi, x ) ->
+                let
+                    (TrackingTask fx) =
+                        f x
+                in
+                ConcurrentTask.map
+                    (\( fxi, v ) ->
+                        ( fxi ++ xi
+                        , v
+                        )
+                    )
+                    fx
+            )
+        |> TrackingTask
 
 
 batch : List (TrackingTask a) -> TrackingTask (List a)
@@ -163,6 +179,8 @@ combineMap f list =
         list
 
 
-getTask : TrackingTask a -> ConcurrentTask e a
-getTask (TrackingTask _ task) =
-    ConcurrentTask.mapError never task
+toConcurrentTask : TrackingTask a -> ConcurrentTask e a
+toConcurrentTask (TrackingTask task) =
+    task
+        |> ConcurrentTask.mapError never
+        |> ConcurrentTask.map Tuple.second

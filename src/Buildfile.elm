@@ -1,35 +1,37 @@
 module Buildfile exposing (build)
 
+import ConcurrentTask exposing (ConcurrentTask)
 import Elm
-import Rule exposing (RuleGenerator)
+import Rule exposing (Rule)
 
 
-build : List RuleGenerator
+build : List (ConcurrentTask e Rule)
 build =
     [ Rule.getFiles "assets"
-        |> Rule.map (List.filter isImage)
-        |> Rule.do
+        |> Rule.andThen
             (\images ->
                 images
+                    |> List.filter isImage
                     |> Rule.combineMap
                         (\image ->
                             Rule.map (Tuple.pair image) <|
                                 Rule.getSize image
                         )
-                    |> Rule.map
-                        (\imagesWithSizes ->
-                            imagesWithSizes
-                                |> List.map
-                                    (\( image, size ) ->
-                                        Elm.declaration image <|
-                                            Elm.string <|
-                                                image
-                                                    ++ ": "
-                                                    ++ Maybe.withDefault "?"
-                                                        (Maybe.map String.fromInt size)
-                                    )
+            )
+        |> Rule.do
+            (\imagesWithSizes ->
+                imagesWithSizes
+                    |> List.map
+                        (\( image, size ) ->
+                            Elm.declaration image <|
+                                Elm.string <|
+                                    image
+                                        ++ ": "
+                                        ++ Maybe.withDefault "?"
+                                            (Maybe.map String.fromInt size)
                         )
-                    |> Rule.writeCodegenFile [ "Images" ]
+                    |> Elm.file [ "Images" ]
+                    |> Rule.writeCodegenFile
             )
     ]
 

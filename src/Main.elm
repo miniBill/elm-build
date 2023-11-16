@@ -184,7 +184,7 @@ update msg model =
 
         ( WithTime (Build options) now, _ ) ->
             info now "Building..."
-                |> ConcurrentTask.andThenDo (Rule.getRules Buildfile.build)
+                |> ConcurrentTask.andThenDo (ConcurrentTask.batch Buildfile.build)
                 |> ConcurrentTask.andThen
                     (\rules ->
                         build rules
@@ -213,7 +213,7 @@ update msg model =
         ( WithTime NoOp now, SettingUpChokidar options { lastEvent } ) ->
             if Time.posixToMillis now - Time.posixToMillis lastEvent >= 30 then
                 info now "Checking if we need to build"
-                    |> ConcurrentTask.andThenDo (Rule.getRules Buildfile.build)
+                    |> ConcurrentTask.andThenDo (ConcurrentTask.batch Buildfile.build)
                     |> ConcurrentTask.andThen getActiveRules
                     |> ConcurrentTask.map (WithoutTime << GotRules)
                     |> attempt { model | inner = PreparingBuild options }
@@ -250,7 +250,7 @@ update msg model =
         ( WithTime NoOp now, Idle options { lastEvent } ) ->
             if Time.posixToMillis now - Time.posixToMillis lastEvent >= 30 then
                 info now "Inputs changed, checking if we need to build"
-                    |> ConcurrentTask.andThenDo (Rule.getRules Buildfile.build)
+                    |> ConcurrentTask.andThenDo (ConcurrentTask.batch Buildfile.build)
                     |> ConcurrentTask.andThen getActiveRules
                     |> ConcurrentTask.map (WithoutTime << GotRules)
                     |> attempt { model | inner = PreparingBuild options }
@@ -360,8 +360,8 @@ getRulesTimes rules =
 getRuleTimes : Rule -> ConcurrentTask e ( List (Maybe Time.Posix), Rule, List (Maybe Time.Posix) )
 getRuleTimes rule =
     ConcurrentTask.map2 (\inputTimes outputTimes -> ( inputTimes, rule, outputTimes ))
-        (ConcurrentTask.batch <| List.map (Rule.getTask << Rule.getMTime) rule.inputs)
-        (ConcurrentTask.batch <| List.map (Rule.getTask << Rule.getMTime) rule.outputs)
+        (ConcurrentTask.batch <| List.map (Rule.toConcurrentTask << Rule.getMTime) rule.inputs)
+        (ConcurrentTask.batch <| List.map (Rule.toConcurrentTask << Rule.getMTime) rule.outputs)
 
 
 decodeOrDie : Decoder a -> Value -> (a -> ConcurrentTask e Msg) -> ConcurrentTask e Msg
