@@ -2,6 +2,7 @@ import { Elm } from "./build/main.mjs";
 import chokidar from "chokidar";
 import fs from "node:fs";
 import * as ConcurrentTask from "@andrewmacmurray/elm-concurrent-task";
+import path from "node:path";
 
 function setForeground(ansi, text) {
   return "\u001b[" + ansi + "m" + text + "\u001b[39m";
@@ -42,6 +43,11 @@ const tasks = {
   getMTime(path) {
     const stat = fs.statSync(path, { throwIfNoEntry: false });
     return stat ? stat.mtimeMs : null;
+  },
+  writeFile(file) {
+    const dir = path.dirname(file.path);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file.path, file.content);
   },
 };
 
