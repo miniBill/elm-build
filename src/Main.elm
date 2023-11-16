@@ -173,6 +173,9 @@ update msg model =
                 }
                 |> attempt model
 
+        ( OnComplete (Error ever), _ ) ->
+            never ever
+
         ( OnComplete (Success submsg), _ ) ->
             update submsg model
 
@@ -258,31 +261,15 @@ update msg model =
         ( WithTime NoOp _, _ ) ->
             ( model, Cmd.none )
 
-        ( OnComplete (Error _), _ ) ->
-            Debug.todo "branch '( OnComplete (Error _), _ )' not implemented"
-
-        ( WithTime (Chokidar _) _, Initial _ ) ->
-            Debug.todo "branch '( WithTime (Chokidar _) _, Initial _ )' not implemented"
-
         ( WithTime (Chokidar _) _, Building _ ) ->
-            Debug.todo "branch '( WithTime (Chokidar _) _, Building _ )' not implemented"
+            -- We'll check whether we need to build more after we're done building
+            ( model, Cmd.none )
 
         ( WithTime (Chokidar _) _, PreparingBuild _ ) ->
-            Debug.todo "branch '( WithTime (Chokidar _) _, PreparingBuild _ )' not implemented"
+            -- We'll check whether we need to build more after we're done building
+            ( model, Cmd.none )
 
-        ( WithTime (SetupChokidar _) _, Initial _ ) ->
-            Debug.todo "branch '( WithTime (SetupChokidar _) _, Initial _ )' not implemented"
-
-        ( WithTime (SetupChokidar _) _, SettingUpChokidar _ _ ) ->
-            Debug.todo "branch '( WithTime (SetupChokidar _) _, SettingUpChokidar _ _ )' not implemented"
-
-        ( WithTime (SetupChokidar _) _, Idle _ _ ) ->
-            Debug.todo "branch '( WithTime (SetupChokidar _) _, Idle _ _ )' not implemented"
-
-        ( WithTime (SetupChokidar _) _, PreparingBuild _ ) ->
-            Debug.todo "branch '( WithTime (SetupChokidar _) _, PreparingBuild _ )' not implemented"
-
-        _ ->
+        ( WithTime _ _, _ ) ->
             die { message = "Unexpected (msg, model) pair " ++ Debug.toString ( msg, model ), exitCode = 1 }
                 |> attempt model
 
