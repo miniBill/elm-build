@@ -1,4 +1,4 @@
-module Rule exposing (Path, Rule, RuleGenerator, TrackingTask, batch, combineMap, do, getFiles, getInputs, getMTime, getRule, getRules, getSize, getTask, map, map2, writeFile)
+module Rule exposing (Path, Rule, RuleGenerator, TrackingTask, batch, combineMap, do, getFiles, getMTime, getRule, getRules, getSize, getTask, map, map2, writeFile)
 
 import ConcurrentTask exposing (ConcurrentTask)
 import Json.Decode as JD
@@ -24,11 +24,6 @@ type alias RuleGenerator =
 do : (a -> Rule) -> TrackingTask a -> RuleGenerator
 do f (TrackingTask inputs task) =
     TrackingTask inputs (ConcurrentTask.map f task)
-
-
-getInputs : TrackingTask a -> List Path
-getInputs (TrackingTask inputs _) =
-    inputs
 
 
 getRules : List RuleGenerator -> ConcurrentTask e (List Rule)

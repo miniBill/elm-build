@@ -1,16 +1,14 @@
-port module Main exposing (main, run)
+port module Main exposing (Flags, InnerModel, Model, Msg, main, run)
 
 import Ansi.Color as Ansi
 import BackendTask
 import BackendTask.Extra
-import BuildTypes exposing (Block(..), Command, Engine(..))
+import BuildTypes exposing (Block, Command, Engine(..))
 import Buildfile
 import Cli.OptionsParser as OptionsParser
 import Cli.Program as Program
-import ConcurrentTask exposing (ConcurrentTask, Response(..), UnexpectedError, expectNoErrors)
+import ConcurrentTask exposing (ConcurrentTask, Response(..))
 import ConcurrentTask.Process
-import ConcurrentTask.Time
-import Dict exposing (Dict)
 import ElmCodegen
 import Iso8601
 import Json.Decode as JD exposing (Decoder, Value)
@@ -18,7 +16,7 @@ import Json.Encode as JE
 import Maybe.Extra
 import Pages.Script as Script exposing (Script)
 import Process
-import Rule exposing (Path, Rule, TrackingTask)
+import Rule exposing (Path, Rule)
 import Set exposing (Set)
 import Task
 import Time
@@ -65,7 +63,6 @@ type Msg
 type InnerMsg
     = Build Options
     | Chokidar Value
-    | DoneBuilding
     | SetupChokidar (List Path)
     | GotRules (List Rule)
     | NoOp
@@ -260,6 +257,30 @@ update msg model =
 
         ( WithTime NoOp _, _ ) ->
             ( model, Cmd.none )
+
+        ( OnComplete (Error _), _ ) ->
+            Debug.todo "branch '( OnComplete (Error _), _ )' not implemented"
+
+        ( WithTime (Chokidar _) _, Initial _ ) ->
+            Debug.todo "branch '( WithTime (Chokidar _) _, Initial _ )' not implemented"
+
+        ( WithTime (Chokidar _) _, Building _ ) ->
+            Debug.todo "branch '( WithTime (Chokidar _) _, Building _ )' not implemented"
+
+        ( WithTime (Chokidar _) _, PreparingBuild _ ) ->
+            Debug.todo "branch '( WithTime (Chokidar _) _, PreparingBuild _ )' not implemented"
+
+        ( WithTime (SetupChokidar _) _, Initial _ ) ->
+            Debug.todo "branch '( WithTime (SetupChokidar _) _, Initial _ )' not implemented"
+
+        ( WithTime (SetupChokidar _) _, SettingUpChokidar _ _ ) ->
+            Debug.todo "branch '( WithTime (SetupChokidar _) _, SettingUpChokidar _ _ )' not implemented"
+
+        ( WithTime (SetupChokidar _) _, Idle _ _ ) ->
+            Debug.todo "branch '( WithTime (SetupChokidar _) _, Idle _ _ )' not implemented"
+
+        ( WithTime (SetupChokidar _) _, PreparingBuild _ ) ->
+            Debug.todo "branch '( WithTime (SetupChokidar _) _, PreparingBuild _ )' not implemented"
 
         _ ->
             die { message = "Unexpected (msg, model) pair " ++ Debug.toString ( msg, model ), exitCode = 1 }
