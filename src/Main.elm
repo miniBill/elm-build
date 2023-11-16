@@ -274,6 +274,8 @@ chokidarWatch paths =
 build : List Rule -> ConcurrentTask e ()
 build rules =
     getActiveRules rules
+        |> ConcurrentTask.andThen (\active -> ConcurrentTask.batch <| List.map .task active)
+        |> ConcurrentTask.mapError never
         |> ConcurrentTask.map (\_ -> ())
 
 
