@@ -4,24 +4,28 @@ import Ansi.Color as Ansi
 import BackendTask
 import BackendTask.Extra
 import BuildTypes exposing (Block(..), Command, Engine(..))
+import Buildfile
 import Cli.OptionsParser as OptionsParser
 import Cli.Program as Program
+import ConcurrentTask exposing (ConcurrentTask)
+import ConcurrentTask.Process
+import ConcurrentTask.Time
+import Dict exposing (Dict)
 import ElmCodegen
 import Iso8601
 import Json.Decode as JD exposing (Decoder, Value)
+import Json.Encode as JE
 import Pages.Script as Script exposing (Script)
 import Process
+import Rule exposing (Path, Rule, TrackingTask)
 import Task
 import Time
 
 
-port chokidarWatch : String -> Cmd msg
+port send : Value -> Cmd msg
 
 
-port log : String -> Cmd msg
-
-
-port die : { message : String, exitCode : Int } -> Cmd msg
+port receive : (Value -> msg) -> Sub msg
 
 
 port chokidar : (Value -> msg) -> Sub msg
@@ -31,67 +35,94 @@ type alias Flags =
     List String
 
 
-type Model
-    = Initial
-    | SettingUpChokidar { lastEvent : Time.Posix }
-    | Idle
+type alias Options =
+    { digest : Bool
+    }
+
+
+type alias Model =
+    { pool : ConcurrentTask.Pool Msg Never Msg
+    , inner : InnerModel
+    }
+
+
+type InnerModel
+    = Initial Options
+    | Building Options
+    | SettingUpChokidar Options { lastEvent : Time.Posix }
+    | Idle Options { lastEvent : Time.Posix }
+    | PreparingBuild Options
 
 
 type Msg
     = WithoutTime InnerMsg
     | WithTime InnerMsg Time.Posix
+    | OnProgress ( ConcurrentTask.Pool Msg Never Msg, Cmd Msg )
+    | OnComplete (ConcurrentTask.Response Never Msg)
+    | GotRules (List Rule)
 
 
 type InnerMsg
-    = Now
+    = Build Options
     | Chokidar Value
+    | DoneBuilding
+    | SetupChokidar (List Path)
+    | NoOp
 
 
 type alias Event =
     { path : String
+    , mtime : Time.Posix
     , data : EventData
     }
 
 
+eventDecoder : Decoder Event
+eventDecoder =
+    JD.map3 Event
+        (JD.field "path" JD.string)
+        (JD.at [ "stats", "mtimeMs" ] (JD.map (Time.millisToPosix << round) JD.float))
+        eventDataDecoder
+
+
 type EventData
-    = Add { hash : String }
+    = Add { hash : Maybe String }
     | AddDir
-    | Change { hash : String }
+    | Change { hash : Maybe String }
     | Unlink
     | UnlinkDir
 
 
-chokidarDataDecoder : Decoder Event
-chokidarDataDecoder =
+eventDataDecoder : Decoder EventData
+eventDataDecoder =
     let
+        withHash : ({ hash : Maybe String } -> EventData) -> Decoder EventData
         withHash ctor =
-            JD.map (\hash -> ctor { hash = hash }) (JD.field "hash" JD.string)
+            JD.map (\hash -> ctor { hash = hash }) (JD.maybe <| JD.field "hash" JD.string)
+
+        inner : String -> Decoder EventData
+        inner eventName =
+            case eventName of
+                "add" ->
+                    withHash Add
+
+                "change" ->
+                    withHash Change
+
+                "unlink" ->
+                    JD.succeed Unlink
+
+                "addDir" ->
+                    JD.succeed AddDir
+
+                "unlinkDir" ->
+                    JD.succeed UnlinkDir
+
+                _ ->
+                    JD.fail <| "Unexpected event name: " ++ eventName
     in
-    JD.map2 Event
-        (JD.field "path" JD.string)
-        (JD.field "eventName" JD.string
-            |> JD.andThen
-                (\eventName ->
-                    case eventName of
-                        "add" ->
-                            withHash Add
-
-                        "change" ->
-                            withHash Change
-
-                        "unlink" ->
-                            JD.succeed Unlink
-
-                        "addDir" ->
-                            JD.succeed AddDir
-
-                        "unlinkDir" ->
-                            JD.succeed UnlinkDir
-
-                        _ ->
-                            JD.fail <| "Unexpected event name: " ++ eventName
-                )
-        )
+    JD.field "eventName" JD.string
+        |> JD.andThen inner
 
 
 main : Program Flags Model Msg
@@ -104,102 +135,180 @@ main =
 
 
 init : Flags -> ( Model, Cmd Msg )
-init _ =
-    ( Initial
-    , Cmd.batch
-        [ Task.perform (WithTime Now) Time.now
-        , info "Starting"
-        ]
+init flags =
+    let
+        options : Options
+        options =
+            { digest = List.member "--digest" flags
+            }
+    in
+    ( { pool = ConcurrentTask.pool
+      , inner = Initial options
+      }
+    , Task.perform (\_ -> WithoutTime (Build options)) (Process.sleep 0)
     )
+
+
+attempt : Model -> ConcurrentTask Never Msg -> ( Model, Cmd Msg )
+attempt model task =
+    let
+        ( newPool, cmd ) =
+            ConcurrentTask.attempt
+                { send = send
+                , pool = model.pool
+                , onComplete = OnComplete
+                }
+                task
+    in
+    ( { model | pool = newPool }, cmd )
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
-    case ( msg, model ) of
+    case ( msg, model.inner ) of
         ( WithoutTime inner, _ ) ->
             ( model, Task.perform (WithTime inner) Time.now )
 
-        ( WithTime Now now, Initial ) ->
-            ( SettingUpChokidar { lastEvent = now }
-            , Cmd.batch
-                [ chokidarWatch "public"
-                , tickAfter 30
-                ]
-            )
+        ( WithTime (Build options) now, _ ) ->
+            info now "Building..."
+                |> ConcurrentTask.andThenDo (Rule.getRules Buildfile.build)
+                |> ConcurrentTask.andThen
+                    (\rules ->
+                        build rules
+                            |> ConcurrentTask.map
+                                (\_ -> WithoutTime <| SetupChokidar (List.concatMap .inputs rules))
+                    )
+                |> attempt { model | inner = Building options }
 
-        ( WithTime (Chokidar data) now, SettingUpChokidar _ ) ->
-            decodeOrDie chokidarDataDecoder data model <|
+        ( WithTime (SetupChokidar targets) now, Building options ) ->
+            info now "Build done, setting up chokidar..."
+                |> ConcurrentTask.andThenDo (setupChokidar options targets)
+                |> attempt { model | inner = SettingUpChokidar options { lastEvent = now } }
+
+        ( WithTime (Chokidar data) now, SettingUpChokidar options _ ) ->
+            (decodeOrDie eventDecoder data <|
                 \{ path } ->
-                    ( SettingUpChokidar { lastEvent = now }, debug <| "Watching " ++ path )
+                    debug now ("Watching " ++ path)
+                        |> ConcurrentTask.andThenDo (tickAfter 30)
+            )
+                |> attempt
+                    { model
+                        | inner =
+                            SettingUpChokidar options { lastEvent = now }
+                    }
 
-        ( WithTime Now now, SettingUpChokidar { lastEvent } ) ->
-            if Time.posixToMillis now - Time.posixToMillis lastEvent > 30 then
-                ( Idle, info "Ready" )
+        ( WithTime NoOp now, SettingUpChokidar options { lastEvent } ) ->
+            if Time.posixToMillis now - Time.posixToMillis lastEvent >= 30 then
+                info now "Ready, preparing build"
+                    |> ConcurrentTask.andThenDo (Rule.getRules Buildfile.build)
+                    |> ConcurrentTask.map GotRules
+                    |> attempt { model | inner = PreparingBuild options }
 
             else
-                ( SettingUpChokidar { lastEvent = now }, tickAfter 30 )
+                ( model, Cmd.none )
 
-        ( WithTime (Chokidar data) now, Idle ) ->
-            decodeOrDie chokidarDataDecoder data model <|
+        ( WithTime (Chokidar data) now, Idle options _ ) ->
+            (decodeOrDie eventDecoder data <|
                 \decoded ->
-                    ( model
-                    , debug <|
-                        Debug.toString
-                            { path = decoded.path
-                            , data = decoded.data
-                            , now = Iso8601.fromTime now
-                            }
-                    )
+                    debug now
+                        (Ansi.fontColor Ansi.green "[Chokidar] "
+                            ++ decoded.path
+                            ++ " "
+                            ++ Debug.toString decoded.data
+                        )
+                        |> ConcurrentTask.andThenDo (tickAfter 30)
+            )
+                |> attempt { model | inner = Idle options { lastEvent = now } }
+
+        ( WithTime NoOp _, _ ) ->
+            ( model, Cmd.none )
 
         _ ->
-            ( model, die { message = "Unexpected message", exitCode = 1 } )
+            die { message = "Unexpected (msg, model) pair " ++ Debug.toString ( msg, model ), exitCode = 1 }
+                |> attempt model
 
 
-decodeOrDie : Decoder a -> Value -> Model -> (a -> ( Model, Cmd Msg )) -> ( Model, Cmd Msg )
-decodeOrDie decoder value model cont =
+setupChokidar : Options -> List Path -> ConcurrentTask Never Msg
+setupChokidar arg1 arg2 =
+    Debug.todo "TODO"
+
+
+build : List Rule -> ConcurrentTask e Bool
+build arg1 =
+    Debug.todo "TODO"
+
+
+decodeOrDie : Decoder a -> Value -> (a -> ConcurrentTask e Msg) -> ConcurrentTask e Msg
+decodeOrDie decoder value cont =
     case JD.decodeValue decoder value of
         Err e ->
-            ( model
-            , die
+            die
                 { message = "Decoding failed: " ++ JD.errorToString e
                 , exitCode = 1
                 }
-            )
 
         Ok v ->
             cont v
 
 
-info : String -> Cmd Msg
-info message =
-    log (Ansi.fontColor Ansi.cyan "info  " ++ message)
+die : { message : String, exitCode : Int } -> ConcurrentTask e Msg
+die { message, exitCode } =
+    { function = "die"
+    , expect = ConcurrentTask.expectWhatever
+    , errors = ConcurrentTask.expectNoErrors
+    , args = JE.object [ ( "message", JE.string message ), ( "exitCode", JE.int exitCode ) ]
+    }
+        |> ConcurrentTask.define
+        |> ConcurrentTask.map (\_ -> WithoutTime NoOp)
 
 
-debug : String -> Cmd Msg
-debug message =
-    log (Ansi.fontColor Ansi.brightBlack "debug " ++ message)
+info : Time.Posix -> String -> ConcurrentTask e Msg
+info now message =
+    message
+        |> timedLog now Ansi.cyan "info"
 
 
-tickAfter : Float -> Cmd Msg
+debug : Time.Posix -> String -> ConcurrentTask e Msg
+debug now message =
+    message
+        |> timedLog now Ansi.brightBlack "debug"
+
+
+timedLog : Time.Posix -> Ansi.Color -> String -> String -> ConcurrentTask e Msg
+timedLog now color class message =
+    ConcurrentTask.define
+        { function = "log"
+        , expect = ConcurrentTask.expectWhatever
+        , errors = ConcurrentTask.expectNoErrors
+        , args =
+            JE.string <|
+                ("["
+                    ++ String.slice 11 -5 (Iso8601.fromTime now)
+                    ++ "] "
+                )
+                    ++ Ansi.fontColor color (String.padRight 6 ' ' class)
+                    ++ message
+        }
+        |> ConcurrentTask.map (\_ -> WithoutTime NoOp)
+
+
+tickAfter : Int -> ConcurrentTask e Msg
 tickAfter delay =
-    Task.perform (\_ -> WithoutTime Now) (Process.sleep delay)
+    ConcurrentTask.Process.sleep delay
+        |> ConcurrentTask.map (\_ -> WithoutTime NoOp)
 
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
-    Sub.map WithoutTime <|
-        Sub.batch
-            [ case model of
-                Initial ->
-                    Sub.none
-
-                SettingUpChokidar _ ->
-                    Sub.none
-
-                Idle ->
-                    Sub.none
-            , chokidar Chokidar
-            ]
+    Sub.batch
+        [ Sub.map WithoutTime <| chokidar Chokidar
+        , ConcurrentTask.onProgress
+            { send = send
+            , receive = receive
+            , onProgress = OnProgress
+            }
+            model.pool
+        ]
 
 
 config :
@@ -281,7 +390,7 @@ toNinjaBlock block =
             String.join " " (List.map escape command)
     in
     case block of
-        Pool { name, depth } ->
+        BuildTypes.Pool { name, depth } ->
             blockToString "pool"
                 name
                 [ ( "depth"
@@ -291,7 +400,7 @@ toNinjaBlock block =
                   )
                 ]
 
-        Rule { name, commands, pool } ->
+        BuildTypes.Rule { name, commands, pool } ->
             blockToString "rule"
                 name
                 [ ( "command"
@@ -303,7 +412,7 @@ toNinjaBlock block =
                 , ( "pool", pool )
                 ]
 
-        Build { rule, inputs, outputs } ->
+        BuildTypes.Build { rule, inputs, outputs } ->
             let
                 line : List String
                 line =

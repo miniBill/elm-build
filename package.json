@@ -5,9 +5,12 @@
     "elm-watch": "^1.1.2"
   },
   "scripts": {
-    "start": "elm make src/Main.elm --output build/main.js && echo -e 'var global = {};\\n' > build/main.mjs && sed 's/this..;/global\\));/' < build/main.js >> build/main.mjs && echo -e '\\n\\nexport const Elm = global.Elm;' >> build/main.mjs && node index.mjs ~/src/witch-awakening"
+    "start": "elm make src/Main.elm --output build/main.js && echo -e 'var global = {};\\n' > build/main.mjs && sed 's/this..;/global\\));/' < build/main.js >> build/main.mjs && echo -e '\\n\\nexport const Elm = global.Elm;' >> build/main.mjs && echo -e '================================\\n' && node --trace-warnings index.mjs"
   },
+  "main": "index.mjs",
+  "type": "module",
   "dependencies": {
+    "@andrewmacmurray/elm-concurrent-task": "^1.0.0",
     "chokidar": "^3.5.3"
   },
   "license": "BSD-3-Clause"

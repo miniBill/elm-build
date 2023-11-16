@@ -2,6 +2,11 @@
 # yarn lockfile v1
 
 
+"@andrewmacmurray/elm-concurrent-task@^1.0.0":
+  version "1.0.0"
+  resolved "https://registry.yarnpkg.com/@andrewmacmurray/elm-concurrent-task/-/elm-concurrent-task-1.0.0.tgz#170bdfe3c88304e63d0965a53b4826816a35f384"
+  integrity sha512-KnrJY4hMS9RqBC0HR9ytVN6w1zvAs5Mgg+UMzJBNs01DdH1LhAs4wIPoECzusoz6e64IdZLBJ3575o39VrRaaw==
+
 "@esbuild/android-arm64@0.17.19":
   version "0.17.19"
   resolved "https://registry.yarnpkg.com/@esbuild/android-arm64/-/android-arm64-0.17.19.tgz#bafb75234a5d3d1b690e7c2956a599345e84a2fd"

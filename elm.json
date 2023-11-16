@@ -2,12 +2,15 @@
     "type": "application",
     "source-directories": [
         "src",
+        "shared",
         "elm-interpreter/src"
     ],
     "elm-version": "0.19.1",
     "dependencies": {
         "direct": {
             "NoRedInk/elm-json-decode-pipeline": "1.0.1",
+            "andrewMacmurray/elm-concurrent-task": "1.0.0",
+            "arowM/elm-multiline-string": "1.0.0",
             "dillonkearns/elm-cli-options-parser": "3.2.0",
             "dillonkearns/elm-pages": "10.0.1",
             "elm/core": "1.0.5",
