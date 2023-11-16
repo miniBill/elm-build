@@ -7,7 +7,7 @@ import BuildTypes exposing (Block(..), Command, Engine(..))
 import Buildfile
 import Cli.OptionsParser as OptionsParser
 import Cli.Program as Program
-import ConcurrentTask exposing (ConcurrentTask)
+import ConcurrentTask exposing (ConcurrentTask, Response(..), UnexpectedError, expectNoErrors)
 import ConcurrentTask.Process
 import ConcurrentTask.Time
 import Dict exposing (Dict)
@@ -15,9 +15,11 @@ import ElmCodegen
 import Iso8601
 import Json.Decode as JD exposing (Decoder, Value)
 import Json.Encode as JE
+import Maybe.Extra
 import Pages.Script as Script exposing (Script)
 import Process
 import Rule exposing (Path, Rule, TrackingTask)
+import Set exposing (Set)
 import Task
 import Time
 
@@ -36,8 +38,7 @@ type alias Flags =
 
 
 type alias Options =
-    { digest : Bool
-    }
+    {}
 
 
 type alias Model =
@@ -59,7 +60,6 @@ type Msg
     | WithTime InnerMsg Time.Posix
     | OnProgress ( ConcurrentTask.Pool Msg Never Msg, Cmd Msg )
     | OnComplete (ConcurrentTask.Response Never Msg)
-    | GotRules (List Rule)
 
 
 type InnerMsg
@@ -67,6 +67,7 @@ type InnerMsg
     | Chokidar Value
     | DoneBuilding
     | SetupChokidar (List Path)
+    | GotRules (List Rule)
     | NoOp
 
 
@@ -139,8 +140,7 @@ init flags =
     let
         options : Options
         options =
-            { digest = List.member "--digest" flags
-            }
+            {}
     in
     ( { pool = ConcurrentTask.pool
       , inner = Initial options
@@ -166,6 +166,19 @@ attempt model task =
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case ( msg, model.inner ) of
+        ( OnProgress ( newPool, cmd ), _ ) ->
+            ( { model | pool = newPool }, cmd )
+
+        ( OnComplete (UnexpectedError e), _ ) ->
+            die
+                { exitCode = 255
+                , message = "Unexpected error: " ++ Debug.toString e
+                }
+                |> attempt model
+
+        ( OnComplete (Success submsg), _ ) ->
+            update submsg model
+
         ( WithoutTime inner, _ ) ->
             ( model, Task.perform (WithTime inner) Time.now )
 
@@ -182,7 +195,7 @@ update msg model =
 
         ( WithTime (SetupChokidar targets) now, Building options ) ->
             info now "Build done, setting up chokidar..."
-                |> ConcurrentTask.andThenDo (setupChokidar options targets)
+                |> ConcurrentTask.andThenDo (chokidarWatch targets)
                 |> attempt { model | inner = SettingUpChokidar options { lastEvent = now } }
 
         ( WithTime (Chokidar data) now, SettingUpChokidar options _ ) ->
@@ -199,13 +212,27 @@ update msg model =
 
         ( WithTime NoOp now, SettingUpChokidar options { lastEvent } ) ->
             if Time.posixToMillis now - Time.posixToMillis lastEvent >= 30 then
-                info now "Ready, preparing build"
+                info now "Ready, checking if we need to build"
                     |> ConcurrentTask.andThenDo (Rule.getRules Buildfile.build)
-                    |> ConcurrentTask.map GotRules
+                    |> ConcurrentTask.andThen getActiveRules
+                    |> ConcurrentTask.map (WithoutTime << GotRules)
                     |> attempt { model | inner = PreparingBuild options }
 
             else
                 ( model, Cmd.none )
+
+        ( WithTime (GotRules []) now, PreparingBuild options ) ->
+            info now "Everything up-to-date"
+                |> attempt { model | inner = Idle options { lastEvent = now } }
+
+        ( WithTime (GotRules rules) now, PreparingBuild options ) ->
+            info now
+                (String.join "\n                   " <|
+                    "These rules need to be run:"
+                        :: List.map viewRule rules
+                )
+                |> ConcurrentTask.andThenDo (ConcurrentTask.succeed (WithoutTime <| Build options))
+                |> attempt model
 
         ( WithTime (Chokidar data) now, Idle options _ ) ->
             (decodeOrDie eventDecoder data <|
@@ -228,14 +255,84 @@ update msg model =
                 |> attempt model
 
 
-setupChokidar : Options -> List Path -> ConcurrentTask Never Msg
-setupChokidar arg1 arg2 =
-    Debug.todo "TODO"
+viewRule : Rule -> String
+viewRule { inputs, outputs } =
+    String.join ", " inputs ++ " => " ++ String.join ", " outputs
 
 
-build : List Rule -> ConcurrentTask e Bool
-build arg1 =
-    Debug.todo "TODO"
+chokidarWatch : List Path -> ConcurrentTask e Msg
+chokidarWatch paths =
+    { function = "chokidarWatch"
+    , expect = ConcurrentTask.expectWhatever
+    , errors = ConcurrentTask.expectNoErrors
+    , args = JE.list JE.string paths
+    }
+        |> ConcurrentTask.define
+        |> ConcurrentTask.map (\_ -> WithoutTime NoOp)
+
+
+build : List Rule -> ConcurrentTask e ()
+build rules =
+    getActiveRules rules
+        |> ConcurrentTask.map (\_ -> ())
+
+
+getActiveRules : List Rule -> ConcurrentTask x (List Rule)
+getActiveRules rules =
+    rules
+        |> List.map
+            (\rule ->
+                ConcurrentTask.map2 (\inputTimes outputTimes -> ( inputTimes, rule, outputTimes ))
+                    (ConcurrentTask.batch <| List.map Rule.getMTime rule.inputs)
+                    (ConcurrentTask.batch <| List.map Rule.getMTime rule.outputs)
+            )
+        |> ConcurrentTask.batch
+        |> ConcurrentTask.map
+            (\withTime ->
+                let
+                    outdated : List Rule
+                    outdated =
+                        List.filterMap
+                            (\( inputTimes, rule, outputTimes ) ->
+                                let
+                                    combine =
+                                        Maybe.Extra.traverse (Maybe.map Time.posixToMillis)
+                                in
+                                case ( combine inputTimes, combine outputTimes ) of
+                                    ( Nothing, _ ) ->
+                                        -- Input files missing: never build
+                                        Nothing
+
+                                    ( _, Nothing ) ->
+                                        -- Output files missing: always build
+                                        Just rule
+
+                                    ( Just its, Just ots ) ->
+                                        Maybe.andThen
+                                            (\maxItime ->
+                                                if List.any (\otime -> otime < maxItime) ots then
+                                                    Just rule
+
+                                                else
+                                                    Nothing
+                                            )
+                                            (List.maximum its)
+                            )
+                            withTime
+
+                    outdatedOutputs : Set Path
+                    outdatedOutputs =
+                        List.concatMap .outputs outdated
+                            |> Set.fromList
+                in
+                outdated
+                    |> List.filter
+                        (\{ inputs } ->
+                            List.all
+                                (\input -> not <| Set.member input outdatedOutputs)
+                                inputs
+                        )
+            )
 
 
 decodeOrDie : Decoder a -> Value -> (a -> ConcurrentTask e Msg) -> ConcurrentTask e Msg

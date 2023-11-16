@@ -1,8 +1,9 @@
-module Rule exposing (Path, Rule, RuleGenerator, TrackingTask, getFiles, getInputs, getRule, getRules, map, writeFile)
+module Rule exposing (Path, Rule, RuleGenerator, TrackingTask, getFiles, getInputs, getMTime, getRule, getRules, map, writeFile)
 
 import ConcurrentTask exposing (ConcurrentTask)
 import Json.Decode as JD
 import Json.Encode as JE
+import Time
 
 
 type alias Path =
@@ -77,3 +78,15 @@ writeFile path content =
       }
         |> ConcurrentTask.define
     )
+
+
+getMTime : Path -> ConcurrentTask e (Maybe Time.Posix)
+getMTime path =
+    { function = "getMTime"
+    , expect =
+        ConcurrentTask.expectJson
+            (JD.nullable <| JD.map (Time.millisToPosix << round) JD.float)
+    , errors = ConcurrentTask.expectNoErrors
+    , args = JE.string path
+    }
+        |> ConcurrentTask.define
