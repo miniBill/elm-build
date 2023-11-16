@@ -16,8 +16,10 @@ const tasks = {
     console.log(setForeground(31 /* red */, "error ") + message);
     process.exit(exitCode);
   },
-  getFiles(path) {
-    return fs.readdirSync(path, { recursive: true });
+  getFiles(dir) {
+    return fs
+      .readdirSync(dir, { recursive: true })
+      .map((name) => path.join(dir, name));
   },
   chokidarWatch: (function () {
     /** @type {chokidar.FSWatcher | null} */
@@ -40,9 +42,8 @@ const tasks = {
       lastWatch = nextWatch;
     };
   })(),
-  getMTime(path) {
-    const stat = fs.statSync(path, { throwIfNoEntry: false });
-    return stat ? stat.mtimeMs : null;
+  stat(path) {
+    return fs.statSync(path, { throwIfNoEntry: false });
   },
   writeFile(file) {
     const dir = path.dirname(file.path);

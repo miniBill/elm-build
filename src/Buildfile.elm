@@ -8,19 +8,34 @@ build : List RuleGenerator
 build =
     [ Rule.getFiles "assets"
         |> Rule.map (List.filter isImage)
-        |> Rule.map
+        |> Rule.do
             (\images ->
-                Rule.writeFile "generated/Images.elm" <|
-                    String.Multiline.here
-                        """
-                        module Images exposing (a)
-                        a=0
-                        {-
-                        """
-                        ++ String.join "\n" images
-                        ++ String.Multiline.here """
-                        -}
-                        """
+                images
+                    |> Rule.combineMap
+                        (\image ->
+                            Rule.map (Tuple.pair image) <|
+                                Rule.getSize image
+                        )
+                    |> Rule.map
+                        (\imagesWithSizes ->
+                            String.Multiline.here
+                                """
+                                    module Images exposing (a)
+                                    a=0
+                                    {-
+                                    """
+                                ++ String.join "\n"
+                                    (List.map
+                                        (\( image, size ) ->
+                                            image ++ ": " ++ Maybe.withDefault "?" (Maybe.map String.fromInt size) ++ " bytes"
+                                        )
+                                        imagesWithSizes
+                                    )
+                                ++ String.Multiline.here """
+                                    -}
+                                    """
+                        )
+                    |> Rule.writeFile "generated/Images.elm"
             )
     ]
 
