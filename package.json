@@ -7,7 +7,7 @@
     "elm-watch": "^1.1.2"
   },
   "scripts": {
-    "start": "elm make src/Main.elm --output build/main.js && echo -e 'var global = {};\\n' > build/main.mjs && sed 's/this..;/global\\));/' < build/main.js >> build/main.mjs && echo -e '\\n\\nexport const Elm = global.Elm;' >> build/main.mjs && echo -e '================================\\n' && node --trace-warnings index.mjs"
+    "start": "elm make src/Main.elm --output build/main.js && echo 'var global = {};\n' > build/main.mjs && sed 's/this..;/global\\));/' < build/main.js >> build/main.mjs && echo '\n\nexport const Elm = global.Elm;' >> build/main.mjs && echo '================================\n' && node --trace-warnings index.mjs"
   },
   "main": "index.mjs",
   "type": "module",
