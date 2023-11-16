@@ -133,7 +133,7 @@ main =
 
 
 init : Flags -> ( Model, Cmd Msg )
-init flags =
+init _ =
     let
         options : Options
         options =
