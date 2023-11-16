@@ -11,13 +11,14 @@ build =
         |> Rule.map
             (\images ->
                 Rule.writeFile "generated/Images.elm" <|
-                    String.Multiline.here <|
+                    String.Multiline.here
                         """
-                        module Images exposing (..)
+                        module Images exposing (a)
                         a=0
-                        {- """
-                            ++ String.join "\n" images
-                            ++ """
+                        {-
+                        """
+                        ++ String.join "\n" images
+                        ++ String.Multiline.here """
                         -}
                         """
             )
