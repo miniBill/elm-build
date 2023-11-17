@@ -2,6 +2,7 @@ module Rule exposing (Path, Rule, TrackingTask, andThen, batch, combineMap, do, 
 
 import ConcurrentTask exposing (ConcurrentTask)
 import Elm
+import Elm.Syntax.ModuleName exposing (ModuleName)
 import Json.Decode as JD
 import Json.Encode as JE
 import Time
@@ -14,28 +15,21 @@ type alias Path =
 type alias Rule =
     { inputs : List Path
     , outputs : List Path
-    , task : ConcurrentTask Never ()
+    , task : () -> ConcurrentTask Never ()
     }
 
 
-type alias Action =
-    { outputs : List Path
-    , task : ConcurrentTask Never ()
-    }
+type Action a
+    = Action (List Path) (a -> ConcurrentTask Never ())
 
 
-do : (a -> Action) -> TrackingTask a -> ConcurrentTask e Rule
-do f (TrackingTask task) =
+do : Action a -> TrackingTask a -> ConcurrentTask e Rule
+do (Action outputs f) (TrackingTask task) =
     ConcurrentTask.map
         (\( inputs, a ) ->
-            let
-                fa : Action
-                fa =
-                    f a
-            in
             { inputs = inputs
-            , outputs = fa.outputs
-            , task = fa.task
+            , outputs = outputs
+            , task = \_ -> f a
             }
         )
         (ConcurrentTask.onError never task)
@@ -53,28 +47,29 @@ getFiles path =
         |> TrackingTask
 
 
-writeFile : Path -> String -> Action
+writeFile : Path -> (a -> String) -> Action a
 writeFile path content =
-    { outputs = [ path ]
-    , task =
-        { function = "writeFile"
-        , expect = ConcurrentTask.expectWhatever
-        , errors = ConcurrentTask.expectNoErrors
-        , args =
-            JE.object
-                [ ( "path", JE.string path )
-                , ( "content", JE.string content )
-                ]
-        }
-            |> ConcurrentTask.define
-    }
+    Action
+        [ path ]
+        (\a ->
+            { function = "writeFile"
+            , expect = ConcurrentTask.expectWhatever
+            , errors = ConcurrentTask.expectNoErrors
+            , args =
+                JE.object
+                    [ ( "path", JE.string path )
+                    , ( "content", JE.string (content a) )
+                    ]
+            }
+                |> ConcurrentTask.define
+        )
 
 
-writeCodegenFile : Elm.File -> Action
-writeCodegenFile file =
+writeCodegenFile : ModuleName -> (a -> List Elm.Declaration) -> Action a
+writeCodegenFile moduleName declarations =
     writeFile
-        ("generated/" ++ file.path)
-        file.contents
+        (String.join "/" ("generated" :: moduleName) ++ ".elm")
+        (\a -> (Elm.file moduleName (declarations a)).contents)
 
 
 getMTime : Path -> TrackingTask (Maybe Time.Posix)

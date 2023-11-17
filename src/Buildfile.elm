@@ -5,7 +5,7 @@ import Elm
 import Rule exposing (Rule)
 
 
-build : List (ConcurrentTask e Rule)
+build : ConcurrentTask e (List Rule)
 build =
     [ Rule.getFiles "assets"
         |> Rule.andThen
@@ -19,21 +19,31 @@ build =
                         )
             )
         |> Rule.do
-            (\imagesWithSizes ->
-                imagesWithSizes
-                    |> List.map
-                        (\( image, size ) ->
-                            Elm.declaration image <|
-                                Elm.string <|
-                                    image
-                                        ++ ": "
-                                        ++ Maybe.withDefault "?"
-                                            (Maybe.map String.fromInt size)
-                        )
-                    |> Elm.file [ "Images" ]
-                    |> Rule.writeCodegenFile
+            (Rule.writeCodegenFile [ "Images" ] <|
+                \imagesWithSizes ->
+                    let
+                        _ =
+                            Debug.log "Creating file" ()
+                    in
+                    imagesWithSizes
+                        |> List.map
+                            (\( image, size ) ->
+                                Elm.declaration image <|
+                                    Elm.string <|
+                                        image
+                                            ++ ": "
+                                            ++ Maybe.withDefault "?"
+                                                (Maybe.map String.fromInt size)
+                            )
+            )
+    , Rule.getSize "assets/empty"
+        |> Rule.do
+            (Rule.writeFile "assets/empty" <|
+                \_ ->
+                    Debug.todo "Should not be called"
             )
     ]
+        |> ConcurrentTask.batch
 
 
 isImage : String -> Bool

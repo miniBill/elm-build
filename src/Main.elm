@@ -1,20 +1,15 @@
-port module Main exposing (Flags, InnerModel, Model, Msg, main, run)
+port module Main exposing (Flags, InnerModel, Model, Msg, main)
 
 import Ansi.Color as Ansi
-import BackendTask
-import BackendTask.Extra
-import BuildTypes exposing (Block, Command, Engine(..))
+import BuildTypes exposing (Engine(..))
 import Buildfile
-import Cli.OptionsParser as OptionsParser
-import Cli.Program as Program
 import ConcurrentTask exposing (ConcurrentTask, Response(..))
 import ConcurrentTask.Process
-import ElmCodegen
+import ConcurrentTask.Time
 import Iso8601
 import Json.Decode as JD exposing (Decoder, Value)
 import Json.Encode as JE
 import Maybe.Extra
-import Pages.Script as Script exposing (Script)
 import Process
 import Rule exposing (Path, Rule)
 import Set exposing (Set)
@@ -41,16 +36,17 @@ type alias Options =
 
 type alias Model =
     { pool : ConcurrentTask.Pool Msg Never Msg
+    , options : Options
     , inner : InnerModel
     }
 
 
 type InnerModel
-    = Initial Options
-    | Building Options
-    | SettingUpChokidar Options { lastEvent : Time.Posix }
-    | Idle Options { lastEvent : Time.Posix }
-    | PreparingBuild Options
+    = Initial
+    | Building
+    | SettingUpChokidar { lastEvent : Time.Posix }
+    | Idle { lastEvent : Time.Posix }
+    | PreparingBuild
 
 
 type Msg
@@ -61,7 +57,7 @@ type Msg
 
 
 type InnerMsg
-    = Build Options
+    = Build
     | Chokidar Value
     | SetupChokidar (List Path)
     | GotRules (List Rule)
@@ -140,9 +136,10 @@ init _ =
             {}
     in
     ( { pool = ConcurrentTask.pool
-      , inner = Initial options
+      , inner = Initial
+      , options = options
       }
-    , Task.perform (\_ -> WithoutTime (Build options)) (Process.sleep 0)
+    , Task.perform (\_ -> WithoutTime Build) (Process.sleep 0)
     )
 
 
@@ -182,62 +179,50 @@ update msg model =
         ( WithoutTime inner, _ ) ->
             ( model, Task.perform (WithTime inner) Time.now )
 
-        ( WithTime (Build options) now, _ ) ->
-            info now "Building..."
-                |> ConcurrentTask.andThenDo (ConcurrentTask.batch Buildfile.build)
+        ( WithTime Build _, _ ) ->
+            Buildfile.build
                 |> ConcurrentTask.andThen
                     (\rules ->
                         build rules
                             |> ConcurrentTask.map
                                 (\_ -> WithoutTime <| SetupChokidar (List.concatMap .inputs rules))
                     )
-                |> attempt { model | inner = Building options }
+                |> attempt { model | inner = Building }
 
-        ( WithTime (SetupChokidar targets) now, Building options ) ->
-            info now "Build done, setting up chokidar..."
+        ( WithTime (SetupChokidar targets) now, Building ) ->
+            info "Build done, setting up chokidar..."
                 |> ConcurrentTask.andThenDo (chokidarWatch targets)
-                |> attempt { model | inner = SettingUpChokidar options { lastEvent = now } }
+                |> attempt { model | inner = SettingUpChokidar { lastEvent = now } }
 
-        ( WithTime (Chokidar data) now, SettingUpChokidar options _ ) ->
+        ( WithTime (Chokidar data) now, SettingUpChokidar _ ) ->
             (decodeOrDie eventDecoder data <|
                 \{ path } ->
-                    debug now ("Watching " ++ path)
+                    debug ("Watching " ++ path)
                         |> ConcurrentTask.andThenDo (tickAfter 30)
             )
                 |> attempt
                     { model
                         | inner =
-                            SettingUpChokidar options { lastEvent = now }
+                            SettingUpChokidar { lastEvent = now }
                     }
 
-        ( WithTime NoOp now, SettingUpChokidar options { lastEvent } ) ->
-            if Time.posixToMillis now - Time.posixToMillis lastEvent >= 30 then
-                info now "Checking if we need to build"
-                    |> ConcurrentTask.andThenDo (ConcurrentTask.batch Buildfile.build)
-                    |> ConcurrentTask.andThen getActiveRules
-                    |> ConcurrentTask.map (WithoutTime << GotRules)
-                    |> attempt { model | inner = PreparingBuild options }
+        ( WithTime (GotRules []) now, PreparingBuild ) ->
+            info "Everything up-to-date"
+                |> attempt { model | inner = Idle { lastEvent = now } }
 
-            else
-                ( model, Cmd.none )
-
-        ( WithTime (GotRules []) now, PreparingBuild options ) ->
-            info now "Everything up-to-date"
-                |> attempt { model | inner = Idle options { lastEvent = now } }
-
-        ( WithTime (GotRules rules) now, PreparingBuild options ) ->
-            info now
+        ( WithTime (GotRules rules) _, PreparingBuild ) ->
+            info
                 (String.join "\n                   " <|
                     "These rules need to be run:"
                         :: List.map viewRule rules
                 )
-                |> ConcurrentTask.andThenDo (ConcurrentTask.succeed (WithoutTime <| Build options))
-                |> attempt model
+                |> ConcurrentTask.andThenDo (ConcurrentTask.succeed (WithoutTime <| Build))
+                |> attempt { model | inner = Building }
 
-        ( WithTime (Chokidar data) now, Idle options _ ) ->
+        ( WithTime (Chokidar data) now, Idle _ ) ->
             (decodeOrDie eventDecoder data <|
                 \decoded ->
-                    debug now
+                    debug
                         (Ansi.fontColor Ansi.green "[Chokidar] "
                             ++ decoded.path
                             ++ " "
@@ -245,15 +230,20 @@ update msg model =
                         )
                         |> ConcurrentTask.andThenDo (tickAfter 30)
             )
-                |> attempt { model | inner = Idle options { lastEvent = now } }
+                |> attempt { model | inner = Idle { lastEvent = now } }
 
-        ( WithTime NoOp now, Idle options { lastEvent } ) ->
+        ( WithTime NoOp now, SettingUpChokidar { lastEvent } ) ->
             if Time.posixToMillis now - Time.posixToMillis lastEvent >= 30 then
-                info now "Inputs changed, checking if we need to build"
-                    |> ConcurrentTask.andThenDo (ConcurrentTask.batch Buildfile.build)
-                    |> ConcurrentTask.andThen getActiveRules
-                    |> ConcurrentTask.map (WithoutTime << GotRules)
-                    |> attempt { model | inner = PreparingBuild options }
+                info "Checking if we need to build"
+                    |> prepareBuild model
+
+            else
+                ( model, Cmd.none )
+
+        ( WithTime NoOp now, Idle { lastEvent } ) ->
+            if Time.posixToMillis now - Time.posixToMillis lastEvent >= 30 then
+                info "Inputs changed, checking if we need to build"
+                    |> prepareBuild model
 
             else
                 ( model, Cmd.none )
@@ -261,17 +251,26 @@ update msg model =
         ( WithTime NoOp _, _ ) ->
             ( model, Cmd.none )
 
-        ( WithTime (Chokidar _) _, Building _ ) ->
+        ( WithTime (Chokidar _) _, Building ) ->
             -- We'll check whether we need to build more after we're done building
             ( model, Cmd.none )
 
-        ( WithTime (Chokidar _) _, PreparingBuild _ ) ->
+        ( WithTime (Chokidar _) _, PreparingBuild ) ->
             -- We'll check whether we need to build more after we're done building
             ( model, Cmd.none )
 
         ( WithTime _ _, _ ) ->
             die { message = "Unexpected (msg, model) pair " ++ Debug.toString ( msg, model ), exitCode = 1 }
                 |> attempt model
+
+
+prepareBuild : Model -> ConcurrentTask Never Msg -> ( Model, Cmd Msg )
+prepareBuild model task =
+    task
+        |> ConcurrentTask.andThenDo Buildfile.build
+        |> ConcurrentTask.andThen getActiveRules
+        |> ConcurrentTask.map (WithoutTime << GotRules)
+        |> attempt { model | inner = PreparingBuild }
 
 
 viewRule : Rule -> String
@@ -292,21 +291,43 @@ chokidarWatch paths =
 
 build : List Rule -> ConcurrentTask e ()
 build rules =
-    getActiveRules rules
-        |> ConcurrentTask.andThen (\active -> ConcurrentTask.batch <| List.map .task active)
-        |> ConcurrentTask.mapError never
-        |> ConcurrentTask.map (\_ -> ())
+    info "Building..."
+        |> ConcurrentTask.andThenDo
+            (getActiveRules rules
+                |> ConcurrentTask.andThen
+                    (\active ->
+                        active
+                            |> List.map
+                                (\rule ->
+                                    debug ("  Running rule " ++ viewRule rule)
+                                        |> ConcurrentTask.andThenDo (rule.task ())
+                                )
+                            |> ConcurrentTask.batch
+                    )
+                |> ConcurrentTask.mapError never
+                |> ignoreList
+            )
+
+
+{-| This ignores the output, but is specialized to avoid tossing away tasks.
+-}
+ignoreList : ConcurrentTask x (List ()) -> ConcurrentTask x ()
+ignoreList =
+    ConcurrentTask.map (\_ -> ())
 
 
 getActiveRules : List Rule -> ConcurrentTask x (List Rule)
 getActiveRules rules =
     rules
-        |> getRulesTimes
+        |> ConcurrentTask.succeed
+        |> thenDo (debug "Getting times")
+        |> ConcurrentTask.andThen getRulesTimes
+        |> thenDo (debug "Got times")
         |> ConcurrentTask.map
             (\withTime ->
                 let
-                    outdated : List Rule
-                    outdated =
+                    activeRules : List Rule
+                    activeRules =
                         List.filterMap
                             (\( inputTimes, rule, outputTimes ) ->
                                 let
@@ -337,17 +358,26 @@ getActiveRules rules =
 
                     outdatedOutputs : Set Path
                     outdatedOutputs =
-                        List.concatMap .outputs outdated
+                        activeRules
+                            |> List.concatMap .outputs
                             |> Set.fromList
                 in
-                outdated
+                activeRules
                     |> List.filter
                         (\{ inputs } ->
-                            List.all
-                                (\input -> not <| Set.member input outdatedOutputs)
-                                inputs
+                            inputs
+                                |> List.all
+                                    (\input ->
+                                        not <|
+                                            Set.member input outdatedOutputs
+                                    )
                         )
             )
+
+
+thenDo : ConcurrentTask e x -> ConcurrentTask e a -> ConcurrentTask e a
+thenDo f xt =
+    ConcurrentTask.andThen (\x -> ConcurrentTask.map (\_ -> x) f) xt
 
 
 getRulesTimes : List Rule -> ConcurrentTask e (List ( List (Maybe Time.Posix), Rule, List (Maybe Time.Posix) ))
@@ -388,33 +418,35 @@ die { message, exitCode } =
         |> ConcurrentTask.map (\_ -> WithoutTime NoOp)
 
 
-info : Time.Posix -> String -> ConcurrentTask e Msg
-info now message =
-    message
-        |> timedLog now Ansi.cyan "info"
+info : String -> ConcurrentTask e Msg
+info message =
+    timedLog Ansi.cyan "info" message
 
 
-debug : Time.Posix -> String -> ConcurrentTask e Msg
-debug now message =
-    message
-        |> timedLog now Ansi.brightBlack "debug"
+debug : String -> ConcurrentTask e Msg
+debug message =
+    timedLog Ansi.brightBlack "debug" message
 
 
-timedLog : Time.Posix -> Ansi.Color -> String -> String -> ConcurrentTask e Msg
-timedLog now color class message =
-    ConcurrentTask.define
-        { function = "log"
-        , expect = ConcurrentTask.expectWhatever
-        , errors = ConcurrentTask.expectNoErrors
-        , args =
-            JE.string <|
-                ("["
-                    ++ String.slice 11 -5 (Iso8601.fromTime now)
-                    ++ "] "
-                )
-                    ++ Ansi.fontColor color (String.padRight 6 ' ' class)
-                    ++ message
-        }
+timedLog : Ansi.Color -> String -> String -> ConcurrentTask e Msg
+timedLog color class message =
+    ConcurrentTask.Time.now
+        |> ConcurrentTask.andThen
+            (\now ->
+                ConcurrentTask.define
+                    { function = "log"
+                    , expect = ConcurrentTask.expectWhatever
+                    , errors = ConcurrentTask.expectNoErrors
+                    , args =
+                        JE.string <|
+                            ("["
+                                ++ String.slice 11 -5 (Iso8601.fromTime now)
+                                ++ "] "
+                            )
+                                ++ Ansi.fontColor color (String.padRight 6 ' ' class)
+                                ++ message
+                    }
+            )
         |> ConcurrentTask.map (\_ -> WithoutTime NoOp)
 
 
@@ -435,137 +467,3 @@ subscriptions model =
             }
             model.pool
         ]
-
-
-config :
-    { targets : List String
-    , engines : List Engine
-    }
-config =
-    { targets = elmCodegenOutput
-    , engines =
-        [ ElmCodegen.engine
-            { flagsFrom = Just "public"
-            , outputs = elmCodegenOutput
-            }
-        ]
-    }
-
-
-elmCodegenOutput : List String
-elmCodegenOutput =
-    [ "generated/Types/UserIdDict.elm"
-    , "generated/Types/GameIdDict.elm"
-    , "generated/Types/TokenDict.elm"
-    , "generated/Images.elm"
-    , "generated/Fonts.elm"
-    ]
-
-
-run : Script
-run =
-    Script.withCliOptions program
-        (\_ ->
-            BackendTask.Extra.pwd
-                |> BackendTask.Extra.log Ansi.cyan "Current directory" (Maybe.withDefault "unknown")
-                |> BackendTask.andThen
-                    (\_ ->
-                        BackendTask.Extra.combineMap
-                            (\(Engine bt) -> bt)
-                            config.engines
-                    )
-                |> BackendTask.map List.concat
-                |> BackendTask.andThen
-                    (\engines ->
-                        Script.writeFile
-                            { path = "build.ninja"
-                            , body = toNinjafile engines ++ "\n"
-                            }
-                            |> BackendTask.allowFatal
-                    )
-                |> BackendTask.andThen
-                    (\_ ->
-                        Script.log (Ansi.fontColor Ansi.brightGreen "Written build.ninja")
-                    )
-        )
-
-
-toNinjafile : List Block -> String
-toNinjafile rules =
-    rules
-        |> List.map toNinjaBlock
-        |> String.join "\n\n"
-
-
-toNinjaBlock : Block -> String
-toNinjaBlock block =
-    let
-        blockToString : String -> String -> List ( String, Maybe String ) -> String
-        blockToString kind name lines =
-            ((kind ++ " " ++ name)
-                :: List.filterMap
-                    (\( key, value ) ->
-                        Maybe.map (\v -> key ++ " = " ++ v) value
-                    )
-                    lines
-            )
-                |> String.join "\n  "
-
-        commandToString : Command -> String
-        commandToString command =
-            String.join " " (List.map escape command)
-    in
-    case block of
-        BuildTypes.Pool { name, depth } ->
-            blockToString "pool"
-                name
-                [ ( "depth"
-                  , depth
-                        |> String.fromInt
-                        |> Just
-                  )
-                ]
-
-        BuildTypes.Rule { name, commands, pool } ->
-            blockToString "rule"
-                name
-                [ ( "command"
-                  , commands
-                        |> List.map commandToString
-                        |> String.join " && "
-                        |> Just
-                  )
-                , ( "pool", pool )
-                ]
-
-        BuildTypes.Build { rule, inputs, outputs } ->
-            let
-                line : List String
-                line =
-                    List.map escape outputs
-                        ++ [ ":", rule ]
-                        ++ List.map escape inputs
-            in
-            blockToString "build"
-                (String.join " " line)
-                []
-
-
-escape : String -> String
-escape arg =
-    if String.contains " " arg || String.contains "'" arg then
-        "'" ++ String.replace "'" "\\'" (String.replace "\\" "\\\\" arg) ++ "'"
-
-    else
-        arg
-
-
-type alias CliOptions =
-    {}
-
-
-program : Program.Config CliOptions
-program =
-    Program.config
-        |> Program.add
-            (OptionsParser.build CliOptions)
