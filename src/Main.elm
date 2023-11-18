@@ -269,7 +269,7 @@ update options msg model =
 
         ( WithTime (GotRules rules) _, PreparingDump ) ->
             info
-                (String.join "\n  " <|
+                (String.join "\n                   " <|
                     "The rules are:"
                         :: List.map viewRule rules
                 )
