@@ -411,14 +411,16 @@ prepareBuild options model task =
 getRules : Options -> ConcurrentTask e (List Rule)
 getRules options =
     Buildfile.build
+        |> ConcurrentTask.batch
         |> ConcurrentTask.map
-            (List.map
-                (\rule ->
-                    { rule
-                        | inputs =
-                            Set.insert options.buildFile rule.inputs
-                    }
-                )
+            (List.concatMap <|
+                List.map
+                    (\rule ->
+                        { rule
+                            | inputs =
+                                Set.insert options.buildFile rule.inputs
+                        }
+                    )
             )
 
 

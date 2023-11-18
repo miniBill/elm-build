@@ -6,7 +6,7 @@ import Rule exposing (Rule)
 import TrackingTask exposing (TrackingTask)
 
 
-build : ConcurrentTask e (List Rule)
+build : List (ConcurrentTask e (List Rule))
 build =
     [ Rule.writeCodegenFile images [ "Images" ] <|
         List.map
@@ -23,8 +23,6 @@ build =
         \path ->
             Rule.convert path ("images/" ++ getFileName path ++ ".webp")
     ]
-        |> ConcurrentTask.batch
-        |> ConcurrentTask.map List.concat
 
 
 getFileName : String -> String
