@@ -1,4 +1,4 @@
-port module Main exposing (Flags, InnerModel, Model, Msg, Options, main)
+port module Main exposing (Command, InnerModel, Model, Msg, Options, main)
 
 import Ansi.Color as Ansi
 import Buildfile
@@ -32,10 +32,6 @@ port printAndExitFailure : String -> Cmd msg
 
 
 port printAndExitSuccess : String -> Cmd msg
-
-
-type alias Flags =
-    List String
 
 
 type alias Options =

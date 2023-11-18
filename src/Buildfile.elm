@@ -13,20 +13,9 @@ build =
                 |> List.map
                     (\path ->
                         let
-                            filename : String
-                            filename =
-                                path
-                                    |> String.split "/"
-                                    |> List.reverse
-                                    |> List.head
-                                    |> Maybe.withDefault path
-
                             name : String
                             name =
-                                filename
-                                    |> String.split "."
-                                    |> List.head
-                                    |> Maybe.withDefault filename
+                                getFileName path
                         in
                         Elm.declaration name <|
                             Elm.string ("images/" ++ name ++ ".webp")
@@ -34,27 +23,28 @@ build =
     , Rule.multiple images <|
         List.map
             (\path ->
-                let
-                    filename : String
-                    filename =
-                        path
-                            |> String.split "/"
-                            |> List.reverse
-                            |> List.head
-                            |> Maybe.withDefault path
-
-                    name : String
-                    name =
-                        filename
-                            |> String.split "."
-                            |> List.head
-                            |> Maybe.withDefault filename
-                in
-                Rule.convert path ("images/" ++ name ++ ".webp")
+                Rule.convert path ("images/" ++ getFileName path ++ ".webp")
             )
     ]
         |> ConcurrentTask.batch
         |> ConcurrentTask.map List.concat
+
+
+getFileName : String -> String
+getFileName path =
+    let
+        filename : String
+        filename =
+            path
+                |> String.split "/"
+                |> List.reverse
+                |> List.head
+                |> Maybe.withDefault path
+    in
+    filename
+        |> String.split "."
+        |> List.head
+        |> Maybe.withDefault filename
 
 
 images : TrackingTask (List String)
