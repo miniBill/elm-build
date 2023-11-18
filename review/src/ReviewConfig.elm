@@ -51,7 +51,7 @@ config =
     , NoUnused.CustomTypeConstructorArgs.rule
     , NoUnused.Dependencies.rule
     , NoUnused.Exports.rule
-        |> Rule.ignoreErrorsForFiles [ "shared/Rule.elm" ]
+        |> Rule.ignoreErrorsForDirectories [ "shared" ]
     , NoUnused.Parameters.rule
     , NoUnused.Patterns.rule
     , NoUnused.Variables.rule
