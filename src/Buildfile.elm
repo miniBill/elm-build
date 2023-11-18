@@ -7,32 +7,30 @@ import Rule exposing (Rule, TrackingTask)
 
 build : ConcurrentTask e (List Rule)
 build =
-    [ images
-        |> (Rule.writeCodegenFile [ "Images" ] <|
-                \imagesWithSizes ->
-                    imagesWithSizes
-                        |> List.map
-                            (\path ->
-                                let
-                                    filename : String
-                                    filename =
-                                        path
-                                            |> String.split "/"
-                                            |> List.reverse
-                                            |> List.head
-                                            |> Maybe.withDefault path
+    [ Rule.writeCodegenFile images [ "Images" ] <|
+        \imagesWithSizes ->
+            imagesWithSizes
+                |> List.map
+                    (\path ->
+                        let
+                            filename : String
+                            filename =
+                                path
+                                    |> String.split "/"
+                                    |> List.reverse
+                                    |> List.head
+                                    |> Maybe.withDefault path
 
-                                    name : String
-                                    name =
-                                        filename
-                                            |> String.split "."
-                                            |> List.head
-                                            |> Maybe.withDefault filename
-                                in
-                                Elm.declaration name <|
-                                    Elm.string path
-                            )
-           )
+                            name : String
+                            name =
+                                filename
+                                    |> String.split "."
+                                    |> List.head
+                                    |> Maybe.withDefault filename
+                        in
+                        Elm.declaration name <|
+                            Elm.string ("images/" ++ name ++ ".webp")
+                    )
     ]
         |> ConcurrentTask.batch
 

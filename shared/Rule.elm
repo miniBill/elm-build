@@ -20,8 +20,13 @@ type alias Rule =
     }
 
 
-do : List Path -> (a -> String) -> (a -> ConcurrentTask String ()) -> TrackingTask a -> ConcurrentTask e Rule
-do outputs desc f (TrackingTask task) =
+do :
+    TrackingTask a
+    -> List Path
+    -> (a -> String)
+    -> (a -> ConcurrentTask String ())
+    -> ConcurrentTask e Rule
+do (TrackingTask task) outputs desc f =
     ConcurrentTask.map
         (\( inputs, a ) ->
             { inputs = Set.fromList inputs
@@ -51,14 +56,23 @@ You should wrap this in a function that automatically keeps track of inputs and 
 
 -}
 command :
-    { outputs : List Path
-    , additionalInputs : List Path
-    , toCommand : a -> String
-    }
-    -> TrackingTask a
+    TrackingTask a
+    ->
+        { outputs : List Path
+        , additionalInputs : List Path
+        , toCommand : a -> String
+        }
     -> ConcurrentTask e Rule
-command config (TrackingTask task) =
-    do config.outputs
+command (TrackingTask task) config =
+    do
+        (task
+            |> ConcurrentTask.map
+                (\( inputs, value ) ->
+                    ( config.additionalInputs ++ inputs, value )
+                )
+            |> TrackingTask
+        )
+        config.outputs
         config.toCommand
         (\a ->
             let
@@ -86,22 +100,15 @@ command config (TrackingTask task) =
                                 )
                     )
         )
-        (task
-            |> ConcurrentTask.map
-                (\( inputs, value ) ->
-                    ( config.additionalInputs ++ inputs, value )
-                )
-            |> TrackingTask
-        )
 
 
 writeFile :
     Path
-    -> (a -> String)
     -> TrackingTask a
+    -> (a -> String)
     -> ConcurrentTask e Rule
-writeFile path content =
-    do
+writeFile path task content =
+    do task
         [ path ]
         (\_ -> "writing file " ++ path)
         (\a ->
@@ -119,19 +126,19 @@ writeFile path content =
 
 
 writeCodegenFile :
-    List String
+    TrackingTask a
+    -> List String
     -> (a -> List Elm.Declaration)
-    -> TrackingTask a
     -> ConcurrentTask e Rule
-writeCodegenFile moduleName declarations task =
+writeCodegenFile task moduleName declarations =
     let
         targetName : String
         targetName =
             String.join "/" ("generated" :: moduleName) ++ ".elm"
     in
     writeFile targetName
-        (\a -> (Elm.file moduleName (declarations a)).contents)
         task
+        (\a -> (Elm.file moduleName (declarations a)).contents)
         |> ConcurrentTask.map (\rule -> { rule | taskDescription = "elm-codegen => " ++ targetName })
 
 
