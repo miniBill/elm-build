@@ -269,9 +269,9 @@ update options msg model =
 
         ( WithTime (GotRules rules) _, PreparingDump ) ->
             info
-                (String.join "\n                   " <|
+                (String.join "\n\n" <|
                     "The rules are:"
-                        :: List.map viewRule rules
+                        :: List.map (String.join "\n" << viewRule) rules
                 )
                 |> ConcurrentTask.andThenDo (exit { exitCode = 0 })
                 |> attempt { model | inner = PreparingDump }
@@ -284,7 +284,7 @@ update options msg model =
             info
                 (String.join "\n                   " <|
                     "These rules need to be run:"
-                        :: List.map viewRule rules
+                        :: List.concatMap viewRule rules
                 )
                 |> ConcurrentTask.andThenDo (ConcurrentTask.succeed (WithoutTime <| Build))
                 |> attempt { model | inner = Building }
@@ -417,9 +417,11 @@ getRules options =
             )
 
 
-viewRule : Rule -> String
-viewRule { inputs, outputs } =
-    String.join ", " (Set.toList outputs) ++ " <-- " ++ String.join ", " (Set.toList inputs)
+viewRule : Rule -> List String
+viewRule { inputs, outputs, taskDescription } =
+    [ String.join ", " (Set.toList outputs) ++ ": " ++ String.join ", " (Set.toList inputs)
+    , "  " ++ taskDescription
+    ]
 
 
 chokidarWatch : List Path -> ConcurrentTask e Msg
@@ -443,7 +445,7 @@ build rules =
                         active
                             |> List.map
                                 (\rule ->
-                                    debug ("  Running rule " ++ viewRule rule)
+                                    debug ("  " ++ rule.taskDescription)
                                         |> ConcurrentTask.andThenDo (rule.task ())
                                 )
                             |> ConcurrentTask.batch

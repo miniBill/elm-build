@@ -16,16 +16,18 @@ type alias Rule =
     { inputs : Set Path
     , outputs : Set Path
     , task : () -> ConcurrentTask String ()
+    , taskDescription : String
     }
 
 
-do : List Path -> (a -> ConcurrentTask String ()) -> TrackingTask a -> ConcurrentTask e Rule
-do outputs f (TrackingTask task) =
+do : List Path -> (a -> String) -> (a -> ConcurrentTask String ()) -> TrackingTask a -> ConcurrentTask e Rule
+do outputs desc f (TrackingTask task) =
     ConcurrentTask.map
         (\( inputs, a ) ->
             { inputs = Set.fromList inputs
             , outputs = Set.fromList outputs
             , task = \_ -> f a
+            , taskDescription = desc a
             }
         )
         (ConcurrentTask.mapError never task)
@@ -57,6 +59,7 @@ command :
     -> ConcurrentTask e Rule
 command config (TrackingTask task) =
     do config.outputs
+        config.toCommand
         (\a ->
             let
                 commandString : String
@@ -100,6 +103,7 @@ writeFile :
 writeFile path content =
     do
         [ path ]
+        (\_ -> "writing file " ++ path)
         (\a ->
             { function = "writeFile"
             , expect = ConcurrentTask.expectWhatever
@@ -120,10 +124,15 @@ writeCodegenFile :
     -> TrackingTask a
     -> ConcurrentTask e Rule
 writeCodegenFile moduleName declarations task =
-    writeFile
-        (String.join "/" ("generated" :: moduleName) ++ ".elm")
+    let
+        targetName : String
+        targetName =
+            String.join "/" ("generated" :: moduleName) ++ ".elm"
+    in
+    writeFile targetName
         (\a -> (Elm.file moduleName (declarations a)).contents)
         task
+        |> ConcurrentTask.map (\rule -> { rule | taskDescription = "elm-codegen => " ++ targetName })
 
 
 getMTime : Path -> TrackingTask (Maybe Time.Posix)
