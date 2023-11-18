@@ -241,8 +241,8 @@ update msg model =
                     debug
                         (Ansi.fontColor Ansi.green "[Chokidar] "
                             ++ decoded.path
-                            ++ " "
-                            ++ Debug.toString decoded.data
+                            ++ " - mtime "
+                            ++ Iso8601.fromTime decoded.mtime
                         )
                         |> ConcurrentTask.andThenDo (tickAfter 30)
             )
@@ -276,7 +276,7 @@ update msg model =
             ( model, Cmd.none )
 
         ( WithTime _ _, _ ) ->
-            die { message = "Unexpected (msg, model) pair " ++ Debug.toString ( msg, model ), exitCode = 1 }
+            die { message = "Unexpected (msg, model) pair " ++ Debug.toString ( msg, model.inner ), exitCode = 1 }
                 |> attempt model
 
 
@@ -352,8 +352,9 @@ getActiveRules rules =
                         List.filterMap
                             (\( inputTimes, rule, outputTimes ) ->
                                 let
-                                    combine =
-                                        Maybe.Extra.traverse (Maybe.map Time.posixToMillis)
+                                    combine : List (Maybe Time.Posix) -> Maybe (List Int)
+                                    combine times =
+                                        Maybe.Extra.traverse (Maybe.map Time.posixToMillis) times
                                 in
                                 case ( combine inputTimes, combine outputTimes ) of
                                     ( Nothing, _ ) ->
