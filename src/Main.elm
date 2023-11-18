@@ -68,11 +68,16 @@ program =
                 |> OptionsParser.withOptionalPositionalArg buildFileOption
                 |> OptionsParser.withDoc "write the list of rules then exit"
             )
+        |> Program.add
+            (OptionsParser.build (Options BuildCommand)
+                |> OptionsParser.withOptionalPositionalArg buildFileOption
+                |> OptionsParser.withDoc "build the project"
+            )
 
 
 buildFileOption : Option (Maybe String) String OptionalPositionalArgOption
 buildFileOption =
-    Option.optionalPositionalArg "Build file"
+    Option.optionalPositionalArg "buildfile"
         |> Option.withDefault "src/Buildfile.elm"
 
 
