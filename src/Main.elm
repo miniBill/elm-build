@@ -165,7 +165,7 @@ update msg model =
         ( OnComplete (UnexpectedError e), _ ) ->
             die
                 { exitCode = 255
-                , message = "Unexpected error: " ++ Debug.toString e
+                , message = "Unexpected error: " ++ unexpectedErrorToString e
                 }
                 |> attempt model
 
@@ -278,6 +278,25 @@ update msg model =
         ( WithTime _ _, _ ) ->
             die { message = "Unexpected (msg, model) pair " ++ Debug.toString ( msg, model.inner ), exitCode = 1 }
                 |> attempt model
+
+
+unexpectedErrorToString : ConcurrentTask.UnexpectedError -> String
+unexpectedErrorToString e =
+    case e of
+        ConcurrentTask.InternalError internal ->
+            "Internal error: " ++ internal
+
+        ConcurrentTask.UnhandledJsException exception ->
+            "Unhandled JS exception in function " ++ exception.function ++ ": " ++ exception.message
+
+        ConcurrentTask.ResponseDecoderFailure failure ->
+            "Response decoder failure in function " ++ failure.function ++ ": " ++ JD.errorToString failure.error
+
+        ConcurrentTask.ErrorsDecoderFailure failure ->
+            "Errors decoder failure in function " ++ failure.function ++ ": " ++ JD.errorToString failure.error
+
+        ConcurrentTask.MissingFunction function ->
+            "Missing function: " ++ function
 
 
 prepareBuild : Model -> ConcurrentTask String Msg -> ( Model, Cmd Msg )

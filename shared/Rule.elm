@@ -59,6 +59,7 @@ command config (TrackingTask task) =
     do config.outputs
         (\a ->
             let
+                commandString : String
                 commandString =
                     config.toCommand a
             in
