@@ -1,15 +1,9 @@
-module BackendTask.Extra exposing (combineMap, log, pwd)
+module BackendTask.Extra exposing (combineMap, log)
 
 import Ansi.Color as Color
 import BackendTask exposing (BackendTask)
-import BackendTask.Env
 import FatalError exposing (FatalError)
 import Pages.Script as Script
-
-
-pwd : BackendTask FatalError (Maybe String)
-pwd =
-    BackendTask.Env.get "PWD"
 
 
 log : Color.Color -> String -> (a -> String) -> BackendTask FatalError a -> BackendTask FatalError a

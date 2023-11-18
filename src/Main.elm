@@ -1,7 +1,6 @@
-port module Main exposing (Flags, InnerModel, Model, Msg, main)
+port module Main exposing (Flags, InnerModel, Model, Msg, Options, main)
 
 import Ansi.Color as Ansi
-import BuildTypes exposing (Engine(..))
 import Buildfile
 import ConcurrentTask exposing (ConcurrentTask, Response(..))
 import ConcurrentTask.Process
