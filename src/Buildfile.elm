@@ -27,7 +27,7 @@ build =
 
 images : TrackingTask (List String)
 images =
-    Rule.getFiles "assets"
+    Rule.listFiles "assets"
         |> Rule.map (List.filter isImage)
 
 

@@ -1,4 +1,4 @@
-module Rule exposing (Path, Rule, TrackingTask, andThen, batch, combineMap, getFiles, getMTime, getSize, map, map2, toConcurrentTask, writeCodegenFile, writeFile)
+module Rule exposing (Path, Rule, TrackingTask, andThen, batch, combineMap, getMTime, getSize, listFiles, map, map2, toConcurrentTask, writeCodegenFile, writeFile)
 
 import ConcurrentTask exposing (ConcurrentTask)
 import Elm
@@ -30,9 +30,9 @@ do outputs f (TrackingTask task) =
         (ConcurrentTask.mapError never task)
 
 
-getFiles : Path -> TrackingTask (List Path)
-getFiles path =
-    { function = "getFiles"
+listFiles : Path -> TrackingTask (List Path)
+listFiles path =
+    { function = "listFiles"
     , expect = ConcurrentTask.expectJson (JD.list JD.string)
     , errors = ConcurrentTask.expectNoErrors
     , args = JE.string path

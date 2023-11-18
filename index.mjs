@@ -16,7 +16,7 @@ const tasks = {
     console.log(setForeground(31 /* red */, "error ") + message);
     process.exit(exitCode);
   },
-  getFiles(dir) {
+  listFiles(dir) {
     return fs
       .readdirSync(dir, { recursive: true })
       .map((name) => path.join(dir, name));
