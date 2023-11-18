@@ -287,9 +287,12 @@ update options msg model =
 
         ( WithTime (GotRules rules) _, PreparingBuild ) ->
             info
-                (String.join "\n                   " <|
-                    "These rules need to be run:"
-                        :: List.concatMap viewRule rules
+                ("These rules need to be run:\n"
+                    ++ String.join "\n\n"
+                        (List.map
+                            (String.join "\n" << viewRule)
+                            rules
+                        )
                 )
                 |> ConcurrentTask.andThenDo (ConcurrentTask.succeed (WithoutTime <| Build))
                 |> attempt { model | inner = Building }
@@ -453,7 +456,7 @@ build rules =
                                     rule.taskDescription
                                         |> List.foldl
                                             (\line ->
-                                                ConcurrentTask.andThenDo (debug ("  " ++ line))
+                                                ConcurrentTask.andThenDo (info ("Running " ++ line))
                                             )
                                             (ConcurrentTask.succeed (WithoutTime NoOp))
                                         |> ConcurrentTask.andThenDo (rule.task ())

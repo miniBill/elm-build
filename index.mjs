@@ -35,12 +35,13 @@ const tasks = {
     process.exit(exitCode);
   },
   async command(args) {
-    console.log("RUNNING", args[0], args.slice(1));
-    await new Promise((resolve, reject) => {
+    let result = await new Promise((resolve, reject) => {
       const process = child_process.spawn(args[0], args.slice(1));
       process.on("error", reject);
       process.on("close", resolve);
     });
+    debugger;
+    return result;
   },
   async listFiles(dir) {
     let names = await promisify((cb) =>
@@ -70,10 +71,14 @@ const tasks = {
     };
   })(),
   async stat(path) {
-    return (
-      (await promisify((cb) => fs.stat(path, { throwIfNoEntry: false }, cb))) ||
-      null
-    );
+    try {
+      const result = await promisify((cb) =>
+        fs.stat(path, { throwIfNoEntry: false }, cb)
+      );
+      return result || null;
+    } catch {
+      return null;
+    }
   },
   async writeFile(file) {
     const dir = path.dirname(file.path);
