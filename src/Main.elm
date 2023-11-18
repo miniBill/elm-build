@@ -276,7 +276,10 @@ update msg model =
             ( model, Cmd.none )
 
         ( WithTime _ _, _ ) ->
-            die { message = "Unexpected (msg, model) pair " ++ Debug.toString ( msg, model.inner ), exitCode = 1 }
+            die
+                { message = "Unexpected (msg, model) pair " ++ Debug.toString ( msg, model.inner )
+                , exitCode = 1
+                }
                 |> attempt model
 
 
