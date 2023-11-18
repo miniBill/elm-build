@@ -2,42 +2,33 @@ module Buildfile exposing (build)
 
 import ConcurrentTask exposing (ConcurrentTask)
 import Elm
-import Rule exposing (Rule)
+import Rule exposing (Rule, TrackingTask)
 
 
 build : ConcurrentTask e (List Rule)
 build =
-    [ Rule.getFiles "assets"
-        |> Rule.andThen
-            (\images ->
-                images
-                    |> List.filter isImage
-                    |> Rule.combineMap
-                        (\image ->
-                            Rule.map (Tuple.pair image) <|
-                                Rule.getSize image
-                        )
-            )
+    [ images
         |> (Rule.writeCodegenFile [ "Images" ] <|
                 \imagesWithSizes ->
                     imagesWithSizes
                         |> List.map
-                            (\( image, size ) ->
-                                Elm.declaration image <|
-                                    Elm.string <|
-                                        image
-                                            ++ ": "
-                                            ++ Maybe.withDefault "?"
-                                                (Maybe.map String.fromInt size)
+                            (\path ->
+                                let
+                                    name =
+                                        String.dropLeft (String.length "assets/") path
+                                in
+                                Elm.declaration name <|
+                                    Elm.string path
                             )
-           )
-    , Rule.getSize "assets/empty"
-        |> (Rule.writeFile "assets/empty" <|
-                \_ ->
-                    Debug.todo "Should not be called"
            )
     ]
         |> ConcurrentTask.batch
+
+
+images : TrackingTask (List String)
+images =
+    Rule.getFiles "assets"
+        |> Rule.map (List.filter isImage)
 
 
 isImage : String -> Bool
