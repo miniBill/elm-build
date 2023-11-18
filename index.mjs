@@ -4,7 +4,12 @@ import fs from "node:fs";
 import * as ConcurrentTask from "@andrewmacmurray/elm-concurrent-task";
 import path from "node:path";
 
-var app = Elm.Main.init({ flags: process.argv.slice(2) });
+const __filename = new URL(import.meta.url).pathname;
+var filenameIndex = process.argv.indexOf(__filename);
+const flags =
+  filenameIndex > 0 ? process.argv.slice(filenameIndex + 1) : process.argv;
+
+var app = Elm.Main.init({ flags });
 
 const tasks = {
   log: console.log,
