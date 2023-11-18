@@ -4,16 +4,11 @@ import fs from "node:fs";
 import * as ConcurrentTask from "@andrewmacmurray/elm-concurrent-task";
 import path from "node:path";
 
-function setForeground(ansi, text) {
-  return "\u001b[" + ansi + "m" + text + "\u001b[39m";
-}
-
 var app = Elm.Main.init({ flags: process.argv.slice(2) });
 
 const tasks = {
   log: console.log,
-  async die({ message, exitCode }) {
-    console.log(setForeground(31 /* red */, "error ") + message);
+  async exit({ exitCode }) {
     process.exit(exitCode);
   },
   listFiles(dir) {

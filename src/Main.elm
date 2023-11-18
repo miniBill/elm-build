@@ -32,6 +32,7 @@ type alias Flags =
 
 type alias Options =
     { buildfile : String
+    , watch : Bool
     }
 
 
@@ -126,11 +127,13 @@ main =
 
 
 init : Flags -> ( Model, Cmd Msg )
-init _ =
+init flags =
     let
         options : Options
         options =
-            { buildfile = "src / Buildfile.elm" }
+            { buildfile = "src / Buildfile.elm"
+            , watch = List.member "--watch" flags
+            }
     in
     ( { pool = ConcurrentTask.pool
       , inner = Initial
@@ -198,9 +201,15 @@ update msg model =
                 |> attempt { model | inner = Building }
 
         ( WithTime (SetupChokidar targets) now, Building ) ->
-            info "Build done, setting up chokidar..."
-                |> ConcurrentTask.andThenDo (chokidarWatch <| Set.toList targets)
-                |> attempt { model | inner = SettingUpChokidar { lastEvent = now } }
+            if model.options.watch then
+                info "Build done, setting up chokidar..."
+                    |> ConcurrentTask.andThenDo (chokidarWatch <| Set.toList targets)
+                    |> attempt { model | inner = SettingUpChokidar { lastEvent = now } }
+
+            else
+                info "Build done, exiting"
+                    |> ConcurrentTask.andThen (\_ -> exit { exitCode = 0 })
+                    |> attempt model
 
         ( WithTime (Chokidar data) now, SettingUpChokidar _ ) ->
             (decodeOrDie eventDecoder data <|
@@ -432,10 +441,16 @@ decodeOrDie decoder value cont =
 
 die : { message : String, exitCode : Int } -> ConcurrentTask e Msg
 die { message, exitCode } =
-    { function = "die"
+    error message
+        |> ConcurrentTask.andThen (\_ -> exit { exitCode = exitCode })
+
+
+exit : { exitCode : Int } -> ConcurrentTask e Msg
+exit { exitCode } =
+    { function = "exit"
     , expect = ConcurrentTask.expectWhatever
     , errors = ConcurrentTask.expectNoErrors
-    , args = JE.object [ ( "message", JE.string message ), ( "exitCode", JE.int exitCode ) ]
+    , args = JE.object [ ( "exitCode", JE.int exitCode ) ]
     }
         |> ConcurrentTask.define
         |> ConcurrentTask.map (\_ -> WithoutTime NoOp)
