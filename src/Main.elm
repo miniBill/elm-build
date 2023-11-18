@@ -420,7 +420,7 @@ getRules options =
 viewRule : Rule -> List String
 viewRule { inputs, outputs, taskDescription } =
     [ String.join ", " (Set.toList outputs) ++ ": " ++ String.join ", " (Set.toList inputs)
-    , "  " ++ taskDescription
+    , "  " ++ String.join "\n  " taskDescription
     ]
 
 
@@ -445,7 +445,12 @@ build rules =
                         active
                             |> List.map
                                 (\rule ->
-                                    debug ("  " ++ rule.taskDescription)
+                                    rule.taskDescription
+                                        |> List.foldl
+                                            (\line ->
+                                                ConcurrentTask.andThenDo (debug ("  " ++ line))
+                                            )
+                                            (ConcurrentTask.succeed (WithoutTime NoOp))
                                         |> ConcurrentTask.andThenDo (rule.task ())
                                 )
                             |> ConcurrentTask.batch

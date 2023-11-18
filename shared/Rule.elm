@@ -1,4 +1,4 @@
-module Rule exposing (Path, Rule, TrackingTask, andThen, batch, combineMap, command, getMTime, getSize, listFiles, map, map2, toConcurrentTask, writeCodegenFile, writeFile)
+module Rule exposing (Path, Rule, TrackingTask, andThen, batch, combineMap, commands, convert, getMTime, getSize, listFiles, map, map2, multiple, succeed, toConcurrentTask, writeCodegenFile, writeFile)
 
 import ConcurrentTask exposing (ConcurrentTask)
 import Elm
@@ -16,24 +16,25 @@ type alias Rule =
     { inputs : Set Path
     , outputs : Set Path
     , task : () -> ConcurrentTask String ()
-    , taskDescription : String
+    , taskDescription : List String
     }
 
 
 do :
     TrackingTask a
     -> List Path
-    -> (a -> String)
+    -> (a -> List String)
     -> (a -> ConcurrentTask String ())
-    -> ConcurrentTask e Rule
+    -> ConcurrentTask e (List Rule)
 do (TrackingTask task) outputs desc f =
     ConcurrentTask.map
         (\( inputs, a ) ->
-            { inputs = Set.fromList inputs
-            , outputs = Set.fromList outputs
-            , task = \_ -> f a
-            , taskDescription = desc a
-            }
+            [ { inputs = Set.fromList inputs
+              , outputs = Set.fromList outputs
+              , task = \_ -> f a
+              , taskDescription = desc a
+              }
+            ]
         )
         (ConcurrentTask.mapError never task)
 
@@ -50,20 +51,20 @@ listFiles path =
         |> TrackingTask
 
 
-{-| Runs a command. `additionalInputs` should be list of files that the command will read. You don't need to specify files that were already read to create the rule, but it's fine to do so.
+{-| Runs a list of commands. `additionalInputs` should be list of files that the command will read. You don't need to specify files that were already read to create the rule, but it's fine to do so.
 
 You should wrap this in a function that automatically keeps track of inputs and outputs.
 
 -}
-command :
+commands :
     TrackingTask a
     ->
         { outputs : List Path
         , additionalInputs : List Path
-        , toCommand : a -> String
+        , toCommands : a -> List (List String)
         }
-    -> ConcurrentTask e Rule
-command (TrackingTask task) config =
+    -> ConcurrentTask e (List Rule)
+commands (TrackingTask task) config =
     do
         (task
             |> ConcurrentTask.map
@@ -73,44 +74,66 @@ command (TrackingTask task) config =
             |> TrackingTask
         )
         config.outputs
-        config.toCommand
+        (config.toCommands >> List.map commandToString)
         (\a ->
-            let
-                commandString : String
-                commandString =
-                    config.toCommand a
-            in
-            { args = JE.string commandString
-            , errors = ConcurrentTask.expectNoErrors
-            , expect = ConcurrentTask.expectJson JD.int
-            , function = "command"
-            }
-                |> ConcurrentTask.define
-                |> ConcurrentTask.andThen
-                    (\exitCode ->
-                        if exitCode == 0 then
-                            ConcurrentTask.succeed ()
+            List.foldl
+                (\commandString acc ->
+                    acc
+                        |> ConcurrentTask.andThenDo
+                            ({ args = JE.list JE.string commandString
+                             , errors = ConcurrentTask.expectNoErrors
+                             , expect = ConcurrentTask.expectJson JD.int
+                             , function = "command"
+                             }
+                                |> ConcurrentTask.define
+                                |> ConcurrentTask.andThen
+                                    (\exitCode ->
+                                        if exitCode == 0 then
+                                            ConcurrentTask.succeed ()
 
-                        else
-                            ConcurrentTask.fail
-                                ("Command "
-                                    ++ JE.encode 0 (JE.string commandString)
-                                    ++ " failed with exit code "
-                                    ++ String.fromInt exitCode
-                                )
-                    )
+                                        else
+                                            ConcurrentTask.fail
+                                                ("Command "
+                                                    ++ commandToString commandString
+                                                    ++ " failed with exit code "
+                                                    ++ String.fromInt exitCode
+                                                )
+                                    )
+                            )
+                )
+                (ConcurrentTask.succeed ())
+                (config.toCommands a)
         )
+
+
+commandToString : List String -> String
+commandToString args =
+    let
+        escapeArg : String -> String
+        escapeArg arg =
+            let
+                escaped : String
+                escaped =
+                    JE.encode 0 <| JE.string arg
+            in
+            if String.contains " " escaped || String.contains "\\" escaped then
+                escaped
+
+            else
+                arg
+    in
+    String.join " " <| List.map escapeArg args
 
 
 writeFile :
     Path
     -> TrackingTask a
     -> (a -> String)
-    -> ConcurrentTask e Rule
+    -> ConcurrentTask e (List Rule)
 writeFile path task content =
     do task
         [ path ]
-        (\_ -> "writing file " ++ path)
+        (\_ -> [ "writing file " ++ path ])
         (\a ->
             { function = "writeFile"
             , expect = ConcurrentTask.expectWhatever
@@ -129,7 +152,7 @@ writeCodegenFile :
     TrackingTask a
     -> List String
     -> (a -> List Elm.Declaration)
-    -> ConcurrentTask e Rule
+    -> ConcurrentTask e (List Rule)
 writeCodegenFile task moduleName declarations =
     let
         targetName : String
@@ -139,7 +162,11 @@ writeCodegenFile task moduleName declarations =
     writeFile targetName
         task
         (\a -> (Elm.file moduleName (declarations a)).contents)
-        |> ConcurrentTask.map (\rule -> { rule | taskDescription = "elm-codegen => " ++ targetName })
+        |> ConcurrentTask.map
+            (List.map <|
+                \rule ->
+                    { rule | taskDescription = [ "elm-codegen => " ++ targetName ] }
+            )
 
 
 getMTime : Path -> TrackingTask (Maybe Time.Posix)
@@ -249,3 +276,51 @@ toConcurrentTask (TrackingTask task) =
     task
         |> ConcurrentTask.mapError never
         |> ConcurrentTask.map Tuple.second
+
+
+multiple : TrackingTask a -> (a -> List (ConcurrentTask e (List Rule))) -> ConcurrentTask e (List Rule)
+multiple (TrackingTask task) f =
+    task
+        |> ConcurrentTask.mapError never
+        |> ConcurrentTask.andThen
+            (\( inputs, v ) ->
+                let
+                    inputsSet : Set String
+                    inputsSet =
+                        Set.fromList inputs
+                in
+                f v
+                    |> ConcurrentTask.batch
+                    |> ConcurrentTask.map
+                        (\rules ->
+                            rules
+                                |> List.concat
+                                |> List.map
+                                    (\rule ->
+                                        { rule | inputs = Set.union inputsSet rule.inputs }
+                                    )
+                        )
+            )
+
+
+convert : String -> String -> ConcurrentTask e (List Rule)
+convert from to =
+    commands (succeed ())
+        { outputs = [ to ]
+        , additionalInputs = [ from ]
+        , toCommands =
+            \_ ->
+                [ [ "mkdir", "-p", dirname to ]
+                , [ "convert", from, to ]
+                ]
+        }
+
+
+dirname : String -> String
+dirname path =
+    path
+        |> String.split "/"
+        |> List.reverse
+        |> List.drop 1
+        |> List.reverse
+        |> String.join "/"

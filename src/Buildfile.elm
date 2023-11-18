@@ -8,8 +8,8 @@ import Rule exposing (Rule, TrackingTask)
 build : ConcurrentTask e (List Rule)
 build =
     [ Rule.writeCodegenFile images [ "Images" ] <|
-        \imagesWithSizes ->
-            imagesWithSizes
+        \paths ->
+            paths
                 |> List.map
                     (\path ->
                         let
@@ -31,8 +31,32 @@ build =
                         Elm.declaration name <|
                             Elm.string ("images/" ++ name ++ ".webp")
                     )
+    , Rule.multiple images <|
+        \paths ->
+            List.map
+                (\path ->
+                    let
+                        filename : String
+                        filename =
+                            path
+                                |> String.split "/"
+                                |> List.reverse
+                                |> List.head
+                                |> Maybe.withDefault path
+
+                        name : String
+                        name =
+                            filename
+                                |> String.split "."
+                                |> List.head
+                                |> Maybe.withDefault filename
+                    in
+                    Rule.convert path ("images/" ++ name ++ ".webp")
+                )
+                paths
     ]
         |> ConcurrentTask.batch
+        |> ConcurrentTask.map List.concat
 
 
 images : TrackingTask (List String)
