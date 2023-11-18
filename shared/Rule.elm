@@ -1,8 +1,7 @@
-module Rule exposing (Path, Rule, TrackingTask, andThen, batch, combineMap, do, getFiles, getMTime, getSize, map, map2, toConcurrentTask, writeCodegenFile, writeFile)
+module Rule exposing (Path, Rule, TrackingTask, andThen, batch, combineMap, getFiles, getMTime, getSize, map, map2, toConcurrentTask, writeCodegenFile, writeFile)
 
 import ConcurrentTask exposing (ConcurrentTask)
 import Elm
-import Elm.Syntax.ModuleName exposing (ModuleName)
 import Json.Decode as JD
 import Json.Encode as JE
 import Time
@@ -19,12 +18,8 @@ type alias Rule =
     }
 
 
-type Action a
-    = Action (List Path) (a -> ConcurrentTask Never ())
-
-
-do : Action a -> TrackingTask a -> ConcurrentTask e Rule
-do (Action outputs f) (TrackingTask task) =
+do : List Path -> (a -> ConcurrentTask Never ()) -> TrackingTask a -> ConcurrentTask e Rule
+do outputs f (TrackingTask task) =
     ConcurrentTask.map
         (\( inputs, a ) ->
             { inputs = inputs
@@ -32,7 +27,7 @@ do (Action outputs f) (TrackingTask task) =
             , task = \_ -> f a
             }
         )
-        (ConcurrentTask.onError never task)
+        (ConcurrentTask.mapError never task)
 
 
 getFiles : Path -> TrackingTask (List Path)
@@ -47,9 +42,13 @@ getFiles path =
         |> TrackingTask
 
 
-writeFile : Path -> (a -> String) -> Action a
+writeFile :
+    Path
+    -> (a -> String)
+    -> TrackingTask a
+    -> ConcurrentTask e Rule
 writeFile path content =
-    Action
+    do
         [ path ]
         (\a ->
             { function = "writeFile"
@@ -65,11 +64,16 @@ writeFile path content =
         )
 
 
-writeCodegenFile : ModuleName -> (a -> List Elm.Declaration) -> Action a
-writeCodegenFile moduleName declarations =
+writeCodegenFile :
+    List String
+    -> (a -> List Elm.Declaration)
+    -> TrackingTask a
+    -> ConcurrentTask e Rule
+writeCodegenFile moduleName declarations task =
     writeFile
         (String.join "/" ("generated" :: moduleName) ++ ".elm")
         (\a -> (Elm.file moduleName (declarations a)).contents)
+        task
 
 
 getMTime : Path -> TrackingTask (Maybe Time.Posix)

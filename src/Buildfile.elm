@@ -18,13 +18,8 @@ build =
                                 Rule.getSize image
                         )
             )
-        |> Rule.do
-            (Rule.writeCodegenFile [ "Images" ] <|
+        |> (Rule.writeCodegenFile [ "Images" ] <|
                 \imagesWithSizes ->
-                    let
-                        _ =
-                            Debug.log "Creating file" ()
-                    in
                     imagesWithSizes
                         |> List.map
                             (\( image, size ) ->
@@ -35,13 +30,12 @@ build =
                                             ++ Maybe.withDefault "?"
                                                 (Maybe.map String.fromInt size)
                             )
-            )
+           )
     , Rule.getSize "assets/empty"
-        |> Rule.do
-            (Rule.writeFile "assets/empty" <|
+        |> (Rule.writeFile "assets/empty" <|
                 \_ ->
                     Debug.todo "Should not be called"
-            )
+           )
     ]
         |> ConcurrentTask.batch
 
