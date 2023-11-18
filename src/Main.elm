@@ -36,7 +36,7 @@ type alias Options =
 
 
 type alias Model =
-    { pool : ConcurrentTask.Pool Msg Never Msg
+    { pool : ConcurrentTask.Pool Msg String Msg
     , options : Options
     , inner : InnerModel
     }
@@ -53,14 +53,14 @@ type InnerModel
 type Msg
     = WithoutTime InnerMsg
     | WithTime InnerMsg Time.Posix
-    | OnProgress ( ConcurrentTask.Pool Msg Never Msg, Cmd Msg )
-    | OnComplete (ConcurrentTask.Response Never Msg)
+    | OnProgress ( ConcurrentTask.Pool Msg String Msg, Cmd Msg )
+    | OnComplete (ConcurrentTask.Response String Msg)
 
 
 type InnerMsg
     = Build
     | Chokidar Value
-    | SetupChokidar (List Path)
+    | SetupChokidar (Set Path)
     | GotRules (List Rule)
     | NoOp
 
@@ -140,7 +140,7 @@ init _ =
     )
 
 
-attempt : Model -> ConcurrentTask Never Msg -> ( Model, Cmd Msg )
+attempt : Model -> ConcurrentTask String Msg -> ( Model, Cmd Msg )
 attempt model task =
     let
         ( newPool, cmd ) =
@@ -167,8 +167,9 @@ update msg model =
                 }
                 |> attempt model
 
-        ( OnComplete (Error ever), _ ) ->
-            never ever
+        ( OnComplete (Error errorMsg), _ ) ->
+            error errorMsg
+                |> attempt model
 
         ( OnComplete (Success submsg), _ ) ->
             update submsg model
@@ -183,19 +184,19 @@ update msg model =
                         build rules
                             |> ConcurrentTask.map
                                 (\_ ->
-                                    WithoutTime <|
-                                        SetupChokidar
-                                            (Set.toList <|
-                                                Set.fromList <|
-                                                    List.concatMap .inputs rules
-                                            )
+                                    rules
+                                        |> List.foldl
+                                            (\{ inputs } -> Set.union inputs)
+                                            Set.empty
+                                        |> SetupChokidar
+                                        |> WithoutTime
                                 )
                     )
                 |> attempt { model | inner = Building }
 
         ( WithTime (SetupChokidar targets) now, Building ) ->
             info "Build done, setting up chokidar..."
-                |> ConcurrentTask.andThenDo (chokidarWatch targets)
+                |> ConcurrentTask.andThenDo (chokidarWatch <| Set.toList targets)
                 |> attempt { model | inner = SettingUpChokidar { lastEvent = now } }
 
         ( WithTime (Chokidar data) now, SettingUpChokidar _ ) ->
@@ -268,7 +269,7 @@ update msg model =
                 |> attempt model
 
 
-prepareBuild : Model -> ConcurrentTask Never Msg -> ( Model, Cmd Msg )
+prepareBuild : Model -> ConcurrentTask String Msg -> ( Model, Cmd Msg )
 prepareBuild model task =
     task
         |> ConcurrentTask.andThenDo (getRules model.options)
@@ -277,15 +278,15 @@ prepareBuild model task =
         |> attempt { model | inner = PreparingBuild }
 
 
-getRules : Options -> ConcurrentTask Never (List Rule)
+getRules : Options -> ConcurrentTask e (List Rule)
 getRules options =
     Buildfile.build
-        |> ConcurrentTask.map (List.map (\rule -> { rule | inputs = options.buildfile :: rule.inputs }))
+        |> ConcurrentTask.map (List.map (\rule -> { rule | inputs = Set.insert options.buildfile rule.inputs }))
 
 
 viewRule : Rule -> String
 viewRule { inputs, outputs } =
-    String.join ", " outputs ++ " <-- " ++ String.join ", " inputs
+    String.join ", " (Set.toList outputs) ++ " <-- " ++ String.join ", " (Set.toList inputs)
 
 
 chokidarWatch : List Path -> ConcurrentTask e Msg
@@ -299,7 +300,7 @@ chokidarWatch paths =
         |> ConcurrentTask.map (\_ -> WithoutTime NoOp)
 
 
-build : List Rule -> ConcurrentTask e ()
+build : List Rule -> ConcurrentTask String ()
 build rules =
     info "Building..."
         |> ConcurrentTask.andThenDo
@@ -314,7 +315,6 @@ build rules =
                                 )
                             |> ConcurrentTask.batch
                     )
-                |> ConcurrentTask.mapError never
                 |> ignoreList
             )
 
@@ -368,14 +368,16 @@ getActiveRules rules =
 
                     outdatedOutputs : Set Path
                     outdatedOutputs =
-                        activeRules
-                            |> List.concatMap .outputs
-                            |> Set.fromList
+                        List.foldl
+                            (\{ outputs } -> Set.union outputs)
+                            Set.empty
+                            activeRules
                 in
                 activeRules
                     |> List.filter
                         (\{ inputs } ->
                             inputs
+                                |> Set.toList
                                 |> List.all
                                     (\input ->
                                         not <|
@@ -399,9 +401,17 @@ getRulesTimes rules =
 
 getRuleTimes : Rule -> ConcurrentTask e ( List (Maybe Time.Posix), Rule, List (Maybe Time.Posix) )
 getRuleTimes rule =
+    let
+        getTimes : Set Path -> ConcurrentTask x (List (Maybe Time.Posix))
+        getTimes set =
+            set
+                |> Set.toList
+                |> List.map (Rule.toConcurrentTask << Rule.getMTime)
+                |> ConcurrentTask.batch
+    in
     ConcurrentTask.map2 (\inputTimes outputTimes -> ( inputTimes, rule, outputTimes ))
-        (ConcurrentTask.batch <| List.map (Rule.toConcurrentTask << Rule.getMTime) rule.inputs)
-        (ConcurrentTask.batch <| List.map (Rule.toConcurrentTask << Rule.getMTime) rule.outputs)
+        (getTimes rule.inputs)
+        (getTimes rule.outputs)
 
 
 decodeOrDie : Decoder a -> Value -> (a -> ConcurrentTask e Msg) -> ConcurrentTask e Msg
@@ -436,6 +446,11 @@ info message =
 debug : String -> ConcurrentTask e Msg
 debug message =
     timedLog Ansi.brightBlack "debug" message
+
+
+error : String -> ConcurrentTask e Msg
+error message =
+    timedLog Ansi.red "error" message
 
 
 timedLog : Ansi.Color -> String -> String -> ConcurrentTask e Msg

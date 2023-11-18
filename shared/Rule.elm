@@ -1,9 +1,10 @@
-module Rule exposing (Path, Rule, TrackingTask, andThen, batch, combineMap, getMTime, getSize, listFiles, map, map2, toConcurrentTask, writeCodegenFile, writeFile)
+module Rule exposing (Path, Rule, TrackingTask, andThen, batch, combineMap, command, getMTime, getSize, listFiles, map, map2, toConcurrentTask, writeCodegenFile, writeFile)
 
 import ConcurrentTask exposing (ConcurrentTask)
 import Elm
 import Json.Decode as JD
 import Json.Encode as JE
+import Set exposing (Set)
 import Time
 
 
@@ -12,18 +13,18 @@ type alias Path =
 
 
 type alias Rule =
-    { inputs : List Path
-    , outputs : List Path
-    , task : () -> ConcurrentTask Never ()
+    { inputs : Set Path
+    , outputs : Set Path
+    , task : () -> ConcurrentTask String ()
     }
 
 
-do : List Path -> (a -> ConcurrentTask Never ()) -> TrackingTask a -> ConcurrentTask e Rule
+do : List Path -> (a -> ConcurrentTask String ()) -> TrackingTask a -> ConcurrentTask e Rule
 do outputs f (TrackingTask task) =
     ConcurrentTask.map
         (\( inputs, a ) ->
-            { inputs = inputs
-            , outputs = outputs
+            { inputs = Set.fromList inputs
+            , outputs = Set.fromList outputs
             , task = \_ -> f a
             }
         )
@@ -40,6 +41,54 @@ listFiles path =
         |> ConcurrentTask.define
         |> ConcurrentTask.map (\v -> ( [ path ], v ))
         |> TrackingTask
+
+
+{-| Runs a command. `additionalInputs` should be list of files that the command will read. You don't need to specify files that were already read to create the rule, but it's fine to do so.
+
+You should wrap this in a function that automatically keeps track of inputs and outputs.
+
+-}
+command :
+    { outputs : List Path
+    , additionalInputs : List Path
+    , toCommand : a -> String
+    }
+    -> TrackingTask a
+    -> ConcurrentTask e Rule
+command config (TrackingTask task) =
+    do config.outputs
+        (\a ->
+            let
+                commandString =
+                    config.toCommand a
+            in
+            { args = JE.string commandString
+            , errors = ConcurrentTask.expectNoErrors
+            , expect = ConcurrentTask.expectJson JD.int
+            , function = "command"
+            }
+                |> ConcurrentTask.define
+                |> ConcurrentTask.andThen
+                    (\exitCode ->
+                        if exitCode == 0 then
+                            ConcurrentTask.succeed ()
+
+                        else
+                            ConcurrentTask.fail
+                                ("Command "
+                                    ++ JE.encode 0 (JE.string commandString)
+                                    ++ " failed with exit code "
+                                    ++ String.fromInt exitCode
+                                )
+                    )
+        )
+        (task
+            |> ConcurrentTask.map
+                (\( inputs, value ) ->
+                    ( config.additionalInputs ++ inputs, value )
+                )
+            |> TrackingTask
+        )
 
 
 writeFile :
