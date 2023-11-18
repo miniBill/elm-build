@@ -2,7 +2,8 @@ module Buildfile exposing (build)
 
 import ConcurrentTask exposing (ConcurrentTask)
 import Elm
-import Rule exposing (Rule, TrackingTask)
+import Rule exposing (Rule)
+import TrackingTask exposing (TrackingTask)
 
 
 build : ConcurrentTask e (List Rule)
@@ -48,7 +49,7 @@ getFileName path =
 images : TrackingTask (List String)
 images =
     Rule.listFiles "assets"
-        |> Rule.map (List.filter isImage)
+        |> TrackingTask.map (List.filter isImage)
 
 
 isImage : String -> Bool

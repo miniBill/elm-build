@@ -1,11 +1,13 @@
-module Rule exposing (Path, Rule, TrackingTask, andThen, batch, combineMap, commands, convert, getMTime, getSize, list, listFiles, map, map2, multiple, succeed, toConcurrentTask, writeCodegenFile, writeFile)
+module Rule exposing (Path, Rule, commands, convert, getMTime, getSize, list, listFiles, multiple, writeCodegenFile, writeFile)
 
 import ConcurrentTask exposing (ConcurrentTask)
 import Elm
+import Internal exposing (TrackingTask(..))
 import Json.Decode as JD
 import Json.Encode as JE
 import Set exposing (Set)
 import Time
+import TrackingTask
 
 
 type alias Path =
@@ -189,12 +191,12 @@ writeCodegenFile task moduleName declarations =
 
 getMTime : Path -> TrackingTask (Maybe Time.Posix)
 getMTime path =
-    stat path |> map (Maybe.map <| \{ mtime } -> mtime)
+    stat path |> TrackingTask.map (Maybe.map <| \{ mtime } -> mtime)
 
 
 getSize : Path -> TrackingTask (Maybe Int)
 getSize path =
-    stat path |> map (Maybe.map <| \{ size } -> size)
+    stat path |> TrackingTask.map (Maybe.map <| \{ size } -> size)
 
 
 type alias Stat =
@@ -250,7 +252,7 @@ multiple (TrackingTask task) f =
 
 convert : String -> String -> ConcurrentTask e (List Rule)
 convert from to =
-    commands (succeed ())
+    commands (TrackingTask.succeed ())
         { outputs = [ to ]
         , additionalInputs = [ from ]
         , toCommands =
@@ -277,76 +279,3 @@ list :
     -> ConcurrentTask e (List Rule)
 list task toRules =
     multiple task (List.map toRules)
-
-
-
--- TrackingTask --
-
-
-type TrackingTask a
-    = TrackingTask (ConcurrentTask Never ( List Path, a ))
-
-
-succeed : a -> TrackingTask a
-succeed value =
-    TrackingTask (ConcurrentTask.succeed ( [], value ))
-
-
-map : (a -> b) -> TrackingTask a -> TrackingTask b
-map f (TrackingTask task) =
-    TrackingTask (ConcurrentTask.map (\( inputs, x ) -> ( inputs, f x )) task)
-
-
-map2 : (a -> b -> c) -> TrackingTask a -> TrackingTask b -> TrackingTask c
-map2 f (TrackingTask ltask) (TrackingTask rtask) =
-    TrackingTask
-        (ConcurrentTask.map2
-            (\( linputs, lx ) ( rinputs, rx ) ->
-                ( linputs ++ rinputs, f lx rx )
-            )
-            ltask
-            rtask
-        )
-
-
-andThen : (a -> TrackingTask b) -> TrackingTask a -> TrackingTask b
-andThen f (TrackingTask task) =
-    task
-        |> ConcurrentTask.andThen
-            (\( xi, x ) ->
-                let
-                    (TrackingTask fx) =
-                        f x
-                in
-                ConcurrentTask.map
-                    (\( fxi, v ) ->
-                        ( fxi ++ xi
-                        , v
-                        )
-                    )
-                    fx
-            )
-        |> TrackingTask
-
-
-batch : List (TrackingTask a) -> TrackingTask (List a)
-batch tasks =
-    List.foldl
-        (\item acc -> map2 (::) item acc)
-        (succeed [])
-        tasks
-
-
-combineMap : (a -> TrackingTask b) -> List a -> TrackingTask (List b)
-combineMap f items =
-    List.foldl
-        (\item acc -> map2 (::) (f item) acc)
-        (succeed [])
-        items
-
-
-toConcurrentTask : TrackingTask a -> ConcurrentTask e a
-toConcurrentTask (TrackingTask task) =
-    task
-        |> ConcurrentTask.mapError never
-        |> ConcurrentTask.map Tuple.second

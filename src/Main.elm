@@ -17,6 +17,7 @@ import Rule exposing (Path, Rule)
 import Set exposing (Set)
 import Task
 import Time
+import TrackingTask
 
 
 port send : Value -> Cmd msg
@@ -551,7 +552,7 @@ getRuleTimes rule =
         getTimes set =
             set
                 |> Set.toList
-                |> List.map (Rule.toConcurrentTask << Rule.getMTime)
+                |> List.map (TrackingTask.toConcurrentTask << Rule.getMTime)
                 |> ConcurrentTask.batch
     in
     ConcurrentTask.map2 (\inputTimes outputTimes -> ( inputTimes, rule, outputTimes ))
