@@ -1,4 +1,4 @@
-module Rule exposing (Path, Rule, TrackingTask, andThen, batch, combineMap, commands, convert, getMTime, getSize, listFiles, map, map2, multiple, succeed, toConcurrentTask, writeCodegenFile, writeFile)
+module Rule exposing (Path, Rule, TrackingTask, andThen, batch, combineMap, commands, convert, getMTime, getSize, list, listFiles, map, map2, multiple, succeed, toConcurrentTask, writeCodegenFile, writeFile)
 
 import ConcurrentTask exposing (ConcurrentTask)
 import Elm
@@ -223,6 +223,62 @@ statDecoder =
         (JD.map (Time.millisToPosix << round) <| JD.field "mtimeMs" JD.float)
 
 
+multiple : TrackingTask a -> (a -> List (ConcurrentTask e (List Rule))) -> ConcurrentTask e (List Rule)
+multiple (TrackingTask task) f =
+    task
+        |> ConcurrentTask.mapError never
+        |> ConcurrentTask.andThen
+            (\( inputs, v ) ->
+                let
+                    inputsSet : Set String
+                    inputsSet =
+                        Set.fromList inputs
+                in
+                f v
+                    |> ConcurrentTask.batch
+                    |> ConcurrentTask.map
+                        (\rules ->
+                            rules
+                                |> List.concat
+                                |> List.map
+                                    (\rule ->
+                                        { rule | inputs = Set.union inputsSet rule.inputs }
+                                    )
+                        )
+            )
+
+
+convert : String -> String -> ConcurrentTask e (List Rule)
+convert from to =
+    commands (succeed ())
+        { outputs = [ to ]
+        , additionalInputs = [ from ]
+        , toCommands =
+            \_ ->
+                [ [ "mkdir", "-p", dirname to ]
+                , [ "convert", from, to ]
+                ]
+        }
+
+
+dirname : String -> String
+dirname path =
+    path
+        |> String.split "/"
+        |> List.reverse
+        |> List.drop 1
+        |> List.reverse
+        |> String.join "/"
+
+
+list :
+    TrackingTask (List a)
+    -> (a -> ConcurrentTask e (List Rule))
+    -> ConcurrentTask e (List Rule)
+list task toRules =
+    multiple task (List.map toRules)
+
+
 
 -- TrackingTask --
 
@@ -274,19 +330,19 @@ andThen f (TrackingTask task) =
 
 
 batch : List (TrackingTask a) -> TrackingTask (List a)
-batch list =
+batch tasks =
     List.foldl
         (\item acc -> map2 (::) item acc)
         (succeed [])
-        list
+        tasks
 
 
 combineMap : (a -> TrackingTask b) -> List a -> TrackingTask (List b)
-combineMap f list =
+combineMap f items =
     List.foldl
         (\item acc -> map2 (::) (f item) acc)
         (succeed [])
-        list
+        items
 
 
 toConcurrentTask : TrackingTask a -> ConcurrentTask e a
@@ -294,51 +350,3 @@ toConcurrentTask (TrackingTask task) =
     task
         |> ConcurrentTask.mapError never
         |> ConcurrentTask.map Tuple.second
-
-
-multiple : TrackingTask a -> (a -> List (ConcurrentTask e (List Rule))) -> ConcurrentTask e (List Rule)
-multiple (TrackingTask task) f =
-    task
-        |> ConcurrentTask.mapError never
-        |> ConcurrentTask.andThen
-            (\( inputs, v ) ->
-                let
-                    inputsSet : Set String
-                    inputsSet =
-                        Set.fromList inputs
-                in
-                f v
-                    |> ConcurrentTask.batch
-                    |> ConcurrentTask.map
-                        (\rules ->
-                            rules
-                                |> List.concat
-                                |> List.map
-                                    (\rule ->
-                                        { rule | inputs = Set.union inputsSet rule.inputs }
-                                    )
-                        )
-            )
-
-
-convert : String -> String -> ConcurrentTask e (List Rule)
-convert from to =
-    commands (succeed ())
-        { outputs = [ to ]
-        , additionalInputs = [ from ]
-        , toCommands =
-            \_ ->
-                [ [ "mkdir", "-p", dirname to ]
-                , [ "convert", from, to ]
-                ]
-        }
-
-
-dirname : String -> String
-dirname path =
-    path
-        |> String.split "/"
-        |> List.reverse
-        |> List.drop 1
-        |> List.reverse
-        |> String.join "/"

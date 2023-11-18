@@ -20,11 +20,9 @@ build =
                         Elm.declaration name <|
                             Elm.string ("images/" ++ name ++ ".webp")
                     )
-    , Rule.multiple images <|
-        List.map
-            (\path ->
-                Rule.convert path ("images/" ++ getFileName path ++ ".webp")
-            )
+    , Rule.list images <|
+        \path ->
+            Rule.convert path ("images/" ++ getFileName path ++ ".webp")
     ]
         |> ConcurrentTask.batch
         |> ConcurrentTask.map List.concat
