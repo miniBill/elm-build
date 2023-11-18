@@ -43,7 +43,7 @@ const tasks = {
     };
   })(),
   stat(path) {
-    return fs.statSync(path, { throwIfNoEntry: false });
+    return fs.statSync(path, { throwIfNoEntry: false }) || null;
   },
   writeFile(file) {
     const dir = path.dirname(file.path);
