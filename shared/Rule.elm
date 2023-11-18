@@ -80,30 +80,48 @@ commands (TrackingTask task) config =
                 (\commandString acc ->
                     acc
                         |> ConcurrentTask.andThenDo
-                            ({ args = JE.list JE.string commandString
-                             , errors = ConcurrentTask.expectNoErrors
-                             , expect = ConcurrentTask.expectJson JD.int
-                             , function = "command"
-                             }
-                                |> ConcurrentTask.define
-                                |> ConcurrentTask.andThen
-                                    (\exitCode ->
-                                        if exitCode == 0 then
-                                            ConcurrentTask.succeed ()
-
-                                        else
-                                            ConcurrentTask.fail
-                                                ("Command "
-                                                    ++ commandToString commandString
-                                                    ++ " failed with exit code "
-                                                    ++ String.fromInt exitCode
-                                                )
-                                    )
+                            (rawCommand commandString
+                                |> ConcurrentTask.map (\_ -> ())
                             )
                 )
                 (ConcurrentTask.succeed ())
                 (config.toCommands a)
         )
+
+
+rawCommand : List String -> ConcurrentTask String { stdout : List String, stderr : List String }
+rawCommand commandString =
+    { args = JE.list JE.string commandString
+    , errors = ConcurrentTask.expectNoErrors
+    , expect =
+        ConcurrentTask.expectJson
+            (JD.map3
+                (\exitCode stdout stderr ->
+                    { exitCode = exitCode
+                    , stdout = stdout
+                    , stderr = stderr
+                    }
+                )
+                (JD.field "exitCode" JD.int)
+                (JD.field "stdout" <| JD.list JD.string)
+                (JD.field "stderr" <| JD.list JD.string)
+            )
+    , function = "command"
+    }
+        |> ConcurrentTask.define
+        |> ConcurrentTask.andThen
+            (\{ exitCode, stdout, stderr } ->
+                if exitCode == 0 then
+                    ConcurrentTask.succeed { stdout = stdout, stderr = stderr }
+
+                else
+                    ConcurrentTask.fail
+                        ("Command "
+                            ++ commandToString commandString
+                            ++ " failed with exit code "
+                            ++ String.fromInt exitCode
+                        )
+            )
 
 
 commandToString : List String -> String

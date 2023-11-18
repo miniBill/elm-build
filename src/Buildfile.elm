@@ -32,28 +32,26 @@ build =
                             Elm.string ("images/" ++ name ++ ".webp")
                     )
     , Rule.multiple images <|
-        \paths ->
-            List.map
-                (\path ->
-                    let
-                        filename : String
-                        filename =
-                            path
-                                |> String.split "/"
-                                |> List.reverse
-                                |> List.head
-                                |> Maybe.withDefault path
+        List.map
+            (\path ->
+                let
+                    filename : String
+                    filename =
+                        path
+                            |> String.split "/"
+                            |> List.reverse
+                            |> List.head
+                            |> Maybe.withDefault path
 
-                        name : String
-                        name =
-                            filename
-                                |> String.split "."
-                                |> List.head
-                                |> Maybe.withDefault filename
-                    in
-                    Rule.convert path ("images/" ++ name ++ ".webp")
-                )
-                paths
+                    name : String
+                    name =
+                        filename
+                            |> String.split "."
+                            |> List.head
+                            |> Maybe.withDefault filename
+                in
+                Rule.convert path ("images/" ++ name ++ ".webp")
+            )
     ]
         |> ConcurrentTask.batch
         |> ConcurrentTask.map List.concat

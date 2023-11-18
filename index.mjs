@@ -36,9 +36,13 @@ const tasks = {
   },
   async command(args) {
     let result = await new Promise((resolve, reject) => {
+      var stdout = [];
+      var stderr = [];
       const process = child_process.spawn(args[0], args.slice(1));
+      process.stdout.on("data", stdout.push);
+      process.stderr.on("data", stderr.push);
       process.on("error", reject);
-      process.on("close", resolve);
+      process.on("close", (exitCode) => resolve({ exitCode, stdout, stderr }));
     });
     debugger;
     return result;
