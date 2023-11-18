@@ -3,6 +3,7 @@ import chokidar from "chokidar";
 import fs from "node:fs";
 import * as ConcurrentTask from "@andrewmacmurray/elm-concurrent-task";
 import path from "node:path";
+import child_process from "node:child_process";
 
 const __filename = new URL(import.meta.url).pathname;
 var filenameIndex = process.argv.indexOf(__filename);
@@ -22,15 +23,30 @@ app.ports.printAndExitSuccess.subscribe((message) => {
   process.exit(0);
 });
 
+function promisify(withCb) {
+  return new Promise((resolve, reject) =>
+    withCb((err, files) => (err ? reject(err) : resolve(files)))
+  );
+}
+
 const tasks = {
   log: console.log,
-  async exit({ exitCode }) {
+  exit({ exitCode }) {
     process.exit(exitCode);
   },
-  listFiles(dir) {
-    return fs
-      .readdirSync(dir, { recursive: true })
-      .map((name) => path.join(dir, name));
+  async command(args) {
+    console.log("RUNNING", args[0], args.slice(1));
+    await new Promise((resolve, reject) => {
+      const process = child_process.spawn(args[0], args.slice(1));
+      process.on("error", reject);
+      process.on("close", resolve);
+    });
+  },
+  async listFiles(dir) {
+    let names = await promisify((cb) =>
+      fs.readdir(dir, { recursive: true }, cb)
+    );
+    return names.map((name) => path.join(dir, name));
   },
   chokidarWatch: (function () {
     /** @type {chokidar.FSWatcher | null} */
@@ -53,13 +69,16 @@ const tasks = {
       lastWatch = nextWatch;
     };
   })(),
-  stat(path) {
-    return fs.statSync(path, { throwIfNoEntry: false }) || null;
+  async stat(path) {
+    return (
+      (await promisify((cb) => fs.stat(path, { throwIfNoEntry: false }, cb))) ||
+      null
+    );
   },
-  writeFile(file) {
+  async writeFile(file) {
     const dir = path.dirname(file.path);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(file.path, file.content);
+    await promisify((cb) => fs.mkdir(dir, { recursive: true }, cb));
+    await promisify((cb) => fs.writeFile(file.path, file.content, cb));
   },
 };
 
