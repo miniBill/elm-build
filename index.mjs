@@ -9,7 +9,18 @@ var filenameIndex = process.argv.indexOf(__filename);
 const flags =
   filenameIndex > 0 ? process.argv.slice(filenameIndex + 1) : process.argv;
 
-var app = Elm.Main.init({ flags });
+var app = Elm.Main.init({
+  flags: { argv: process.argv, versionMessage: "0.1" },
+});
+
+app.ports.printAndExitFailure.subscribe((message) => {
+  console.log(message);
+  process.exit(1);
+});
+app.ports.printAndExitSuccess.subscribe((message) => {
+  console.log(message);
+  process.exit(0);
+});
 
 const tasks = {
   log: console.log,

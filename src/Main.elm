@@ -2,6 +2,9 @@ port module Main exposing (Flags, InnerModel, Model, Msg, Options, main)
 
 import Ansi.Color as Ansi
 import Buildfile
+import Cli.Option as Option exposing (Option, OptionalPositionalArgOption)
+import Cli.OptionsParser as OptionsParser
+import Cli.Program as Program
 import ConcurrentTask exposing (ConcurrentTask, Response(..))
 import ConcurrentTask.Process
 import ConcurrentTask.Time
@@ -25,19 +28,56 @@ port receive : (Value -> msg) -> Sub msg
 port chokidar : (Value -> msg) -> Sub msg
 
 
+port printAndExitFailure : String -> Cmd msg
+
+
+port printAndExitSuccess : String -> Cmd msg
+
+
 type alias Flags =
     List String
 
 
 type alias Options =
-    { buildfile : String
-    , watch : Bool
+    { command : Command
+    , buildFile : String
     }
+
+
+type Command
+    = BuildCommand
+    | WatchCommand
+    | DumpRulesCommand
+
+
+program : Program.Config Options
+program =
+    Program.config
+        |> Program.add
+            (OptionsParser.buildSubCommand "build" (Options BuildCommand)
+                |> OptionsParser.withOptionalPositionalArg buildFileOption
+                |> OptionsParser.withDoc "build the project"
+            )
+        |> Program.add
+            (OptionsParser.buildSubCommand "watch" (Options WatchCommand)
+                |> OptionsParser.withOptionalPositionalArg buildFileOption
+                |> OptionsParser.withDoc "build the project, then watch for changes and rebuild accordingly"
+            )
+        |> Program.add
+            (OptionsParser.buildSubCommand "dump-rules" (Options DumpRulesCommand)
+                |> OptionsParser.withOptionalPositionalArg buildFileOption
+                |> OptionsParser.withDoc "write the list of rules then exit"
+            )
+
+
+buildFileOption : Option (Maybe String) String OptionalPositionalArgOption
+buildFileOption =
+    Option.optionalPositionalArg "Build file"
+        |> Option.withDefault "src/Buildfile.elm"
 
 
 type alias Model =
     { pool : ConcurrentTask.Pool Msg String Msg
-    , options : Options
     , inner : InnerModel
     }
 
@@ -48,6 +88,7 @@ type InnerModel
     | SettingUpChokidar { lastEvent : Time.Posix }
     | Idle { lastEvent : Time.Posix }
     | PreparingBuild
+    | PreparingDump
 
 
 type Msg
@@ -116,33 +157,31 @@ eventDataDecoder =
         |> JD.andThen inner
 
 
-main : Program Flags Model Msg
+main : Program.StatefulProgram Model Msg Options {}
 main =
-    Platform.worker
-        { init = init
+    Program.stateful <|
+        { printAndExitFailure = printAndExitFailure
+        , printAndExitSuccess = printAndExitSuccess
+        , init = init
+        , config = program
         , update = update
         , subscriptions = subscriptions
         }
 
 
-init : Flags -> ( Model, Cmd Msg )
-init flags =
-    let
-        options : Options
-        options =
-            { buildfile = "src / Buildfile.elm"
-            , watch = List.member "--watch" flags
-            }
-    in
+init : Program.FlagsIncludingArgv {} -> Options -> ( Model, Cmd Msg )
+init _ _ =
     ( { pool = ConcurrentTask.pool
       , inner = Initial
-      , options = options
       }
     , Task.perform (\_ -> WithoutTime Build) (Process.sleep 0)
     )
 
 
-attempt : Model -> ConcurrentTask String Msg -> ( Model, Cmd Msg )
+attempt :
+    { a | pool : ConcurrentTask.Pool Msg String Msg }
+    -> ConcurrentTask String Msg
+    -> ( { a | pool : ConcurrentTask.Pool Msg String Msg }, Cmd Msg )
 attempt model task =
     let
         ( newPool, cmd ) =
@@ -156,59 +195,65 @@ attempt model task =
     ( { model | pool = newPool }, cmd )
 
 
-update : Msg -> Model -> ( Model, Cmd Msg )
-update msg model =
+update : Options -> Msg -> Model -> ( Model, Cmd Msg )
+update options msg model =
     case ( msg, model.inner ) of
         ( OnProgress ( newPool, cmd ), _ ) ->
             ( { model | pool = newPool }, cmd )
 
         ( OnComplete (UnexpectedError e), _ ) ->
-            die
-                { exitCode = 255
-                , message = "Unexpected error: " ++ unexpectedErrorToString e
-                }
+            die ("Unexpected error: " ++ unexpectedErrorToString e)
                 |> attempt model
 
         ( OnComplete (Error errorMsg), _ ) ->
-            die
-                { exitCode = 255
-                , message = "Unexpected error: " ++ errorMsg
-                }
+            die ("Unexpected error: " ++ errorMsg)
                 |> attempt model
 
         ( OnComplete (Success submsg), _ ) ->
-            update submsg model
+            update options submsg model
 
         ( WithoutTime inner, _ ) ->
             ( model, Task.perform (WithTime inner) Time.now )
 
         ( WithTime Build _, _ ) ->
-            getRules model.options
-                |> ConcurrentTask.andThen
-                    (\rules ->
-                        build rules
-                            |> ConcurrentTask.map
-                                (\_ ->
-                                    rules
-                                        |> List.foldl
-                                            (\{ inputs } -> Set.union inputs)
-                                            Set.empty
-                                        |> SetupChokidar
-                                        |> WithoutTime
-                                )
-                    )
-                |> attempt { model | inner = Building }
+            case options.command of
+                DumpRulesCommand ->
+                    getRules options
+                        |> ConcurrentTask.map (WithoutTime << GotRules)
+                        |> attempt { model | inner = PreparingDump }
+
+                _ ->
+                    getRules options
+                        |> ConcurrentTask.andThen
+                            (\rules ->
+                                build rules
+                                    |> ConcurrentTask.map
+                                        (\_ ->
+                                            rules
+                                                |> List.foldl
+                                                    (\{ inputs } -> Set.union inputs)
+                                                    Set.empty
+                                                |> SetupChokidar
+                                                |> WithoutTime
+                                        )
+                            )
+                        |> attempt { model | inner = Building }
 
         ( WithTime (SetupChokidar targets) now, Building ) ->
-            if model.options.watch then
-                info "Build done, setting up chokidar..."
-                    |> ConcurrentTask.andThenDo (chokidarWatch <| Set.toList targets)
-                    |> attempt { model | inner = SettingUpChokidar { lastEvent = now } }
+            case options.command of
+                WatchCommand ->
+                    info "Build done, setting up chokidar..."
+                        |> ConcurrentTask.andThenDo (chokidarWatch <| Set.toList targets)
+                        |> attempt { model | inner = SettingUpChokidar { lastEvent = now } }
 
-            else
-                info "Build done, exiting"
-                    |> ConcurrentTask.andThen (\_ -> exit { exitCode = 0 })
-                    |> attempt model
+                BuildCommand ->
+                    info "Build done, exiting"
+                        |> ConcurrentTask.andThen (\_ -> exit { exitCode = 0 })
+                        |> attempt model
+
+                DumpRulesCommand ->
+                    die "Unexpected state reached: SetupChokidar with a DumpRulesCommand command"
+                        |> attempt model
 
         ( WithTime (Chokidar data) now, SettingUpChokidar _ ) ->
             (decodeOrDie eventDecoder data <|
@@ -221,6 +266,15 @@ update msg model =
                         | inner =
                             SettingUpChokidar { lastEvent = now }
                     }
+
+        ( WithTime (GotRules rules) _, PreparingDump ) ->
+            info
+                (String.join "\n  " <|
+                    "The rules are:"
+                        :: List.map viewRule rules
+                )
+                |> ConcurrentTask.andThenDo (exit { exitCode = 0 })
+                |> attempt { model | inner = PreparingDump }
 
         ( WithTime (GotRules []) now, PreparingBuild ) ->
             info "Everything up-to-date"
@@ -251,7 +305,7 @@ update msg model =
         ( WithTime NoOp now, SettingUpChokidar { lastEvent } ) ->
             if Time.posixToMillis now - Time.posixToMillis lastEvent >= 30 then
                 info "Checking if we need to build"
-                    |> prepareBuild model
+                    |> prepareBuild options model
 
             else
                 ( model, Cmd.none )
@@ -259,7 +313,7 @@ update msg model =
         ( WithTime NoOp now, Idle { lastEvent } ) ->
             if Time.posixToMillis now - Time.posixToMillis lastEvent >= 30 then
                 info "Inputs changed, checking if we need to build"
-                    |> prepareBuild model
+                    |> prepareBuild options model
 
             else
                 ( model, Cmd.none )
@@ -275,12 +329,50 @@ update msg model =
             -- We'll check whether we need to build more after we're done building
             ( model, Cmd.none )
 
-        ( WithTime _ _, _ ) ->
-            die
-                { message = "Unexpected (msg, model) pair " ++ Debug.toString ( msg, model.inner )
-                , exitCode = 1
-                }
+        ( WithTime inner _, _ ) ->
+            die ("Unexpected (msg, model) pair " ++ innerMsgToString inner ++ " " ++ innerModelToString model.inner)
                 |> attempt model
+
+
+innerMsgToString : InnerMsg -> String
+innerMsgToString inner =
+    case inner of
+        NoOp ->
+            "NoOp"
+
+        Build ->
+            "Build"
+
+        Chokidar _ ->
+            "Chokidar _"
+
+        SetupChokidar _ ->
+            "SetupChokidar _"
+
+        GotRules _ ->
+            "GotRules _"
+
+
+innerModelToString : InnerModel -> String
+innerModelToString inner =
+    case inner of
+        Initial ->
+            "Initial"
+
+        Building ->
+            "Building"
+
+        SettingUpChokidar _ ->
+            "SettingUpChokidar _"
+
+        Idle _ ->
+            "Idle _"
+
+        PreparingBuild ->
+            "PreparingBuild"
+
+        PreparingDump ->
+            "PreparingDump"
 
 
 unexpectedErrorToString : ConcurrentTask.UnexpectedError -> String
@@ -302,10 +394,10 @@ unexpectedErrorToString e =
             "Missing function: " ++ function
 
 
-prepareBuild : Model -> ConcurrentTask String Msg -> ( Model, Cmd Msg )
-prepareBuild model task =
+prepareBuild : Options -> Model -> ConcurrentTask String Msg -> ( Model, Cmd Msg )
+prepareBuild options model task =
     task
-        |> ConcurrentTask.andThenDo (getRules model.options)
+        |> ConcurrentTask.andThenDo (getRules options)
         |> ConcurrentTask.andThen getActiveRules
         |> ConcurrentTask.map (WithoutTime << GotRules)
         |> attempt { model | inner = PreparingBuild }
@@ -314,7 +406,15 @@ prepareBuild model task =
 getRules : Options -> ConcurrentTask e (List Rule)
 getRules options =
     Buildfile.build
-        |> ConcurrentTask.map (List.map (\rule -> { rule | inputs = Set.insert options.buildfile rule.inputs }))
+        |> ConcurrentTask.map
+            (List.map
+                (\rule ->
+                    { rule
+                        | inputs =
+                            Set.insert options.buildFile rule.inputs
+                    }
+                )
+            )
 
 
 viewRule : Rule -> String
@@ -452,19 +552,16 @@ decodeOrDie : Decoder a -> Value -> (a -> ConcurrentTask e Msg) -> ConcurrentTas
 decodeOrDie decoder value cont =
     case JD.decodeValue decoder value of
         Err e ->
-            die
-                { message = "Decoding failed: " ++ JD.errorToString e
-                , exitCode = 1
-                }
+            die <| "Decoding failed: " ++ JD.errorToString e
 
         Ok v ->
             cont v
 
 
-die : { message : String, exitCode : Int } -> ConcurrentTask e Msg
-die { message, exitCode } =
+die : String -> ConcurrentTask e Msg
+die message =
     error message
-        |> ConcurrentTask.andThen (\_ -> exit { exitCode = exitCode })
+        |> ConcurrentTask.andThenDo (exit { exitCode = 1 })
 
 
 exit : { exitCode : Int } -> ConcurrentTask e Msg
