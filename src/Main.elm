@@ -81,9 +81,9 @@ eventDecoder =
 
 
 type EventData
-    = Add { hash : Maybe String }
+    = Add
     | AddDir
-    | Change { hash : Maybe String }
+    | Change
     | Unlink
     | UnlinkDir
 
@@ -91,18 +91,14 @@ type EventData
 eventDataDecoder : Decoder EventData
 eventDataDecoder =
     let
-        withHash : ({ hash : Maybe String } -> EventData) -> Decoder EventData
-        withHash ctor =
-            JD.map (\hash -> ctor { hash = hash }) (JD.maybe <| JD.field "hash" JD.string)
-
         inner : String -> Decoder EventData
         inner eventName =
             case eventName of
                 "add" ->
-                    withHash Add
+                    JD.succeed Add
 
                 "change" ->
-                    withHash Change
+                    JD.succeed Change
 
                 "unlink" ->
                     JD.succeed Unlink
