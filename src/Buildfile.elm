@@ -14,8 +14,20 @@ build =
                         |> List.map
                             (\path ->
                                 let
+                                    filename : String
+                                    filename =
+                                        path
+                                            |> String.split "/"
+                                            |> List.reverse
+                                            |> List.head
+                                            |> Maybe.withDefault path
+
+                                    name : String
                                     name =
-                                        String.dropLeft (String.length "assets/") path
+                                        filename
+                                            |> String.split "."
+                                            |> List.head
+                                            |> Maybe.withDefault filename
                                 in
                                 Elm.declaration name <|
                                     Elm.string path
