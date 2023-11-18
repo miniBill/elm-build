@@ -168,7 +168,10 @@ update msg model =
                 |> attempt model
 
         ( OnComplete (Error errorMsg), _ ) ->
-            error errorMsg
+            die
+                { exitCode = 255
+                , message = "Unexpected error: " ++ errorMsg
+                }
                 |> attempt model
 
         ( OnComplete (Success submsg), _ ) ->
