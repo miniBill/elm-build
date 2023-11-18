@@ -1,12 +1,11 @@
 module Buildfile exposing (build)
 
-import ConcurrentTask exposing (ConcurrentTask)
 import Elm
-import Rule exposing (Rule)
+import Rule exposing (Rules)
 import TrackingTask exposing (TrackingTask)
 
 
-build : List (ConcurrentTask e (List Rule))
+build : List Rules
 build =
     [ Rule.writeCodegenFile images [ "Images" ] <|
         List.map

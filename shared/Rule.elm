@@ -1,4 +1,4 @@
-module Rule exposing (Path, Rule, commands, convert, getMTime, getSize, list, listFiles, multiple, writeCodegenFile, writeFile)
+module Rule exposing (Path, Rules, addInputs, batch, commands, convert, getMTime, getSize, list, listFiles, multiple, writeCodegenFile, writeFile)
 
 import ConcurrentTask exposing (ConcurrentTask)
 import Elm
@@ -7,19 +7,15 @@ import Json.Decode as JD
 import Json.Encode as JE
 import Set exposing (Set)
 import Time
-import TrackingTask
+import TrackingTask exposing (TrackingTask)
 
 
 type alias Path =
     String
 
 
-type alias Rule =
-    { inputs : Set Path
-    , outputs : Set Path
-    , task : () -> ConcurrentTask String ()
-    , taskDescription : List String
-    }
+type alias Rules =
+    Internal.Rules
 
 
 do :
@@ -27,7 +23,7 @@ do :
     -> List Path
     -> (a -> List String)
     -> (a -> ConcurrentTask String ())
-    -> ConcurrentTask e (List Rule)
+    -> Rules
 do (TrackingTask task) outputs desc f =
     ConcurrentTask.map
         (\( inputs, a ) ->
@@ -38,7 +34,8 @@ do (TrackingTask task) outputs desc f =
               }
             ]
         )
-        (ConcurrentTask.mapError never task)
+        task
+        |> Internal.Rules
 
 
 listFiles : Path -> TrackingTask (List Path)
@@ -65,7 +62,7 @@ commands :
         , additionalInputs : List Path
         , toCommands : a -> List (List String)
         }
-    -> ConcurrentTask e (List Rule)
+    -> Rules
 commands (TrackingTask task) config =
     do
         (task
@@ -149,7 +146,7 @@ writeFile :
     Path
     -> TrackingTask a
     -> (a -> String)
-    -> ConcurrentTask e (List Rule)
+    -> Rules
 writeFile path task content =
     do task
         [ path ]
@@ -172,21 +169,25 @@ writeCodegenFile :
     TrackingTask a
     -> List String
     -> (a -> List Elm.Declaration)
-    -> ConcurrentTask e (List Rule)
+    -> Rules
 writeCodegenFile task moduleName declarations =
     let
         targetName : String
         targetName =
             String.join "/" ("generated" :: moduleName) ++ ".elm"
+
+        (Internal.Rules inner) =
+            writeFile targetName
+                task
+                (\a -> (Elm.file moduleName (declarations a)).contents)
     in
-    writeFile targetName
-        task
-        (\a -> (Elm.file moduleName (declarations a)).contents)
+    inner
         |> ConcurrentTask.map
             (List.map <|
                 \rule ->
                     { rule | taskDescription = [ "elm-codegen => " ++ targetName ] }
             )
+        |> Internal.Rules
 
 
 getMTime : Path -> TrackingTask (Maybe Time.Posix)
@@ -225,7 +226,7 @@ statDecoder =
         (JD.map (Time.millisToPosix << round) <| JD.field "mtimeMs" JD.float)
 
 
-multiple : TrackingTask a -> (a -> List (ConcurrentTask e (List Rule))) -> ConcurrentTask e (List Rule)
+multiple : TrackingTask a -> (a -> List Rules) -> Rules
 multiple (TrackingTask task) f =
     task
         |> ConcurrentTask.mapError never
@@ -235,22 +236,33 @@ multiple (TrackingTask task) f =
                     inputsSet : Set String
                     inputsSet =
                         Set.fromList inputs
+
+                    (Internal.Rules inner) =
+                        f v
+                            |> batch
+                            |> addInputs inputsSet
                 in
-                f v
-                    |> ConcurrentTask.batch
-                    |> ConcurrentTask.map
-                        (\rules ->
-                            rules
-                                |> List.concat
-                                |> List.map
-                                    (\rule ->
-                                        { rule | inputs = Set.union inputsSet rule.inputs }
-                                    )
-                        )
+                inner
             )
+        |> Internal.Rules
 
 
-convert : String -> String -> ConcurrentTask e (List Rule)
+addInputs : Set String -> Rules -> Rules
+addInputs additionalInputs (Internal.Rules task) =
+    Internal.Rules
+        (ConcurrentTask.map
+            (List.map
+                (\rule ->
+                    { rule
+                        | inputs = Set.union additionalInputs rule.inputs
+                    }
+                )
+            )
+            task
+        )
+
+
+convert : String -> String -> Rules
 convert from to =
     commands (TrackingTask.succeed ())
         { outputs = [ to ]
@@ -275,7 +287,16 @@ dirname path =
 
 list :
     TrackingTask (List a)
-    -> (a -> ConcurrentTask e (List Rule))
-    -> ConcurrentTask e (List Rule)
+    -> (a -> Rules)
+    -> Rules
 list task toRules =
     multiple task (List.map toRules)
+
+
+batch : List Rules -> Rules
+batch rules =
+    rules
+        |> List.map (\(Internal.Rules rule) -> rule)
+        |> ConcurrentTask.batch
+        |> ConcurrentTask.map List.concat
+        |> Internal.Rules

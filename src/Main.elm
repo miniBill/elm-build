@@ -8,12 +8,13 @@ import Cli.Program as Program
 import ConcurrentTask exposing (ConcurrentTask, Response(..))
 import ConcurrentTask.Process
 import ConcurrentTask.Time
+import Internal exposing (RuleData)
 import Iso8601
 import Json.Decode as JD exposing (Decoder, Value)
 import Json.Encode as JE
 import Maybe.Extra
 import Process
-import Rule exposing (Path, Rule)
+import Rule exposing (Path, Rules)
 import Set exposing (Set)
 import Task
 import Time
@@ -104,7 +105,7 @@ type InnerMsg
     = Build
     | Chokidar Value
     | SetupChokidar (Set Path)
-    | GotRules (List Rule)
+    | GotRules (List RuleData)
     | NoOp
 
 
@@ -218,14 +219,20 @@ update options msg model =
             ( model, Task.perform (WithTime inner) Time.now )
 
         ( WithTime Build _, _ ) ->
+            let
+                (Internal.Rules inner) =
+                    getRules options
+            in
             case options.command of
                 DumpRulesCommand ->
-                    getRules options
+                    inner
+                        |> ConcurrentTask.mapError never
                         |> ConcurrentTask.map (WithoutTime << GotRules)
                         |> attempt { model | inner = PreparingDump }
 
                 _ ->
-                    getRules options
+                    inner
+                        |> ConcurrentTask.mapError never
                         |> ConcurrentTask.andThen
                             (\rules ->
                                 build rules
@@ -402,29 +409,26 @@ unexpectedErrorToString e =
 prepareBuild : Options -> Model -> ConcurrentTask String Msg -> ( Model, Cmd Msg )
 prepareBuild options model task =
     task
-        |> ConcurrentTask.andThenDo (getRules options)
+        |> ConcurrentTask.andThenDo
+            (let
+                (Internal.Rules inner) =
+                    getRules options
+             in
+             ConcurrentTask.mapError never inner
+            )
         |> ConcurrentTask.andThen getActiveRules
         |> ConcurrentTask.map (WithoutTime << GotRules)
         |> attempt { model | inner = PreparingBuild }
 
 
-getRules : Options -> ConcurrentTask e (List Rule)
+getRules : Options -> Rules
 getRules options =
     Buildfile.build
-        |> ConcurrentTask.batch
-        |> ConcurrentTask.map
-            (List.concatMap <|
-                List.map
-                    (\rule ->
-                        { rule
-                            | inputs =
-                                Set.insert options.buildFile rule.inputs
-                        }
-                    )
-            )
+        |> Rule.batch
+        |> Rule.addInputs (Set.singleton options.buildFile)
 
 
-viewRule : Rule -> List String
+viewRule : RuleData -> List String
 viewRule { inputs, outputs, taskDescription } =
     [ String.join ", " (Set.toList outputs) ++ ": " ++ String.join ", " (Set.toList inputs)
     , "  " ++ String.join "\n  " taskDescription
@@ -442,7 +446,7 @@ chokidarWatch paths =
         |> ConcurrentTask.map (\_ -> WithoutTime NoOp)
 
 
-build : List Rule -> ConcurrentTask String ()
+build : List RuleData -> ConcurrentTask String ()
 build rules =
     info "Building..."
         |> ConcurrentTask.andThenDo
@@ -473,7 +477,7 @@ ignoreList =
     ConcurrentTask.map (\_ -> ())
 
 
-getActiveRules : List Rule -> ConcurrentTask x (List Rule)
+getActiveRules : List RuleData -> ConcurrentTask x (List RuleData)
 getActiveRules rules =
     rules
         |> ConcurrentTask.succeed
@@ -483,7 +487,7 @@ getActiveRules rules =
         |> ConcurrentTask.map
             (\withTime ->
                 let
-                    activeRules : List Rule
+                    activeRules : List RuleData
                     activeRules =
                         List.filterMap
                             (\( inputTimes, rule, outputTimes ) ->
@@ -540,14 +544,14 @@ thenDo f xt =
     ConcurrentTask.andThen (\x -> ConcurrentTask.map (\_ -> x) f) xt
 
 
-getRulesTimes : List Rule -> ConcurrentTask e (List ( List (Maybe Time.Posix), Rule, List (Maybe Time.Posix) ))
+getRulesTimes : List RuleData -> ConcurrentTask e (List ( List (Maybe Time.Posix), RuleData, List (Maybe Time.Posix) ))
 getRulesTimes rules =
     rules
         |> List.map getRuleTimes
         |> ConcurrentTask.batch
 
 
-getRuleTimes : Rule -> ConcurrentTask e ( List (Maybe Time.Posix), Rule, List (Maybe Time.Posix) )
+getRuleTimes : RuleData -> ConcurrentTask e ( List (Maybe Time.Posix), RuleData, List (Maybe Time.Posix) )
 getRuleTimes rule =
     let
         getTimes : Set Path -> ConcurrentTask x (List (Maybe Time.Posix))
