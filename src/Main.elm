@@ -31,7 +31,8 @@ type alias Flags =
 
 
 type alias Options =
-    {}
+    { buildfile : String
+    }
 
 
 type alias Model =
@@ -133,7 +134,7 @@ init _ =
     let
         options : Options
         options =
-            {}
+            { buildfile = "src / Buildfile.elm" }
     in
     ( { pool = ConcurrentTask.pool
       , inner = Initial
@@ -180,12 +181,19 @@ update msg model =
             ( model, Task.perform (WithTime inner) Time.now )
 
         ( WithTime Build _, _ ) ->
-            Buildfile.build
+            getRules model.options
                 |> ConcurrentTask.andThen
                     (\rules ->
                         build rules
                             |> ConcurrentTask.map
-                                (\_ -> WithoutTime <| SetupChokidar (List.concatMap .inputs rules))
+                                (\_ ->
+                                    WithoutTime <|
+                                        SetupChokidar
+                                            (Set.toList <|
+                                                Set.fromList <|
+                                                    List.concatMap .inputs rules
+                                            )
+                                )
                     )
                 |> attempt { model | inner = Building }
 
@@ -267,10 +275,16 @@ update msg model =
 prepareBuild : Model -> ConcurrentTask Never Msg -> ( Model, Cmd Msg )
 prepareBuild model task =
     task
-        |> ConcurrentTask.andThenDo Buildfile.build
+        |> ConcurrentTask.andThenDo (getRules model.options)
         |> ConcurrentTask.andThen getActiveRules
         |> ConcurrentTask.map (WithoutTime << GotRules)
         |> attempt { model | inner = PreparingBuild }
+
+
+getRules : Options -> ConcurrentTask Never (List Rule)
+getRules options =
+    Buildfile.build
+        |> ConcurrentTask.map (List.map (\rule -> { rule | inputs = options.buildfile :: rule.inputs }))
 
 
 viewRule : Rule -> String
