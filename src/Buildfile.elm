@@ -9,18 +9,16 @@ import TrackingTask exposing (TrackingTask)
 build : ConcurrentTask e (List Rule)
 build =
     [ Rule.writeCodegenFile images [ "Images" ] <|
-        \paths ->
-            paths
-                |> List.map
-                    (\path ->
-                        let
-                            name : String
-                            name =
-                                getFileName path
-                        in
-                        Elm.declaration name <|
-                            Elm.string ("images/" ++ name ++ ".webp")
-                    )
+        List.map
+            (\path ->
+                let
+                    name : String
+                    name =
+                        getFileName path
+                in
+                Elm.declaration name <|
+                    Elm.string ("images/" ++ name ++ ".webp")
+            )
     , Rule.list images <|
         \path ->
             Rule.convert path ("images/" ++ getFileName path ++ ".webp")
