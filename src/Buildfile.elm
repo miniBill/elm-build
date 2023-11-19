@@ -27,52 +27,59 @@ build =
             Rule.convert path ("images/" ++ getFileName path ++ ".webp")
     , Rule.writeCodegenFile gradients [ "Gradients" ] <|
         List.reverse
-            << List.map
-                (\( name, gradient ) ->
-                    let
-                        content : Elm.Expression
-                        content =
-                            case Image.decode gradient of
-                                Nothing ->
-                                    Elm.apply
-                                        (Elm.value
-                                            { importFrom = [ "Debug" ]
-                                            , name = "todo"
-                                            , annotation =
-                                                Just <|
-                                                    Elm.Annotation.function
-                                                        [ Elm.Annotation.string ]
-                                                        (Elm.Annotation.var "a")
-                                            }
-                                        )
-                                        [ Elm.string <| "Could not decode gradient: " ++ name ]
-
-                                Just decoded ->
-                                    Image.toList decoded
-                                        |> List.map
-                                            (\pixel ->
-                                                let
-                                                    r : Int
-                                                    r =
-                                                        modBy 256 <| pixel // (256 ^ 3)
-
-                                                    g : Int
-                                                    g =
-                                                        modBy 256 <| pixel // (256 ^ 2)
-
-                                                    b : Int
-                                                    b =
-                                                        modBy 256 <| pixel // (256 ^ 1)
-                                                in
-                                                Elm.triple (Elm.int r) (Elm.int g) (Elm.int b)
-                                            )
-                                        |> Elm.list
-                    in
-                    content
-                        |> Elm.declaration (String.replace "_g" "G" name)
-                        |> Elm.expose
-                )
+            << List.map gradientToDeclaration
     ]
+
+
+gradientToDeclaration : ( String, Bytes ) -> Elm.Declaration
+gradientToDeclaration ( name, gradient ) =
+    let
+        content : Elm.Expression
+        content =
+            case Image.decode gradient of
+                Nothing ->
+                    debugTodo <| Elm.string <| "Could not decode gradient: " ++ name
+
+                Just decoded ->
+                    Image.toList decoded
+                        |> List.map
+                            (\pixel ->
+                                let
+                                    r : Int
+                                    r =
+                                        modBy 256 <| pixel // (256 ^ 3)
+
+                                    g : Int
+                                    g =
+                                        modBy 256 <| pixel // (256 ^ 2)
+
+                                    b : Int
+                                    b =
+                                        modBy 256 <| pixel // (256 ^ 1)
+                                in
+                                Elm.triple (Elm.int r) (Elm.int g) (Elm.int b)
+                            )
+                        |> Elm.list
+    in
+    content
+        |> Elm.declaration (String.replace "_g" "G" name)
+        |> Elm.expose
+
+
+debugTodo : Elm.Expression -> Elm.Expression
+debugTodo arg =
+    Elm.apply
+        (Elm.value
+            { importFrom = [ "Debug" ]
+            , name = "todo"
+            , annotation =
+                Just <|
+                    Elm.Annotation.function
+                        [ Elm.Annotation.string ]
+                        (Elm.Annotation.var "a")
+            }
+        )
+        [ arg ]
 
 
 gradients : TrackingTask (List ( String, Bytes ))
