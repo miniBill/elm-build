@@ -226,13 +226,11 @@ update options msg model =
             case options.command of
                 DumpRulesCommand ->
                     inner
-                        |> ConcurrentTask.mapError never
                         |> ConcurrentTask.map (WithoutTime << GotRules)
                         |> attempt { model | inner = PreparingDump }
 
                 _ ->
                     inner
-                        |> ConcurrentTask.mapError never
                         |> ConcurrentTask.andThen
                             (\rules ->
                                 build rules
@@ -414,7 +412,7 @@ prepareBuild options model task =
                 (Internal.Rules inner) =
                     getRules options
              in
-             ConcurrentTask.mapError never inner
+             inner
             )
         |> ConcurrentTask.andThen getActiveRules
         |> ConcurrentTask.map (WithoutTime << GotRules)
@@ -477,7 +475,7 @@ ignoreList =
     ConcurrentTask.map (\_ -> ())
 
 
-getActiveRules : List RuleData -> ConcurrentTask x (List RuleData)
+getActiveRules : List RuleData -> ConcurrentTask String (List RuleData)
 getActiveRules rules =
     rules
         |> ConcurrentTask.succeed
@@ -539,22 +537,22 @@ getActiveRules rules =
             )
 
 
-thenDo : ConcurrentTask e x -> ConcurrentTask e a -> ConcurrentTask e a
+thenDo : ConcurrentTask String x -> ConcurrentTask String a -> ConcurrentTask String a
 thenDo f xt =
     ConcurrentTask.andThen (\x -> ConcurrentTask.map (\_ -> x) f) xt
 
 
-getRulesTimes : List RuleData -> ConcurrentTask e (List ( List (Maybe Time.Posix), RuleData, List (Maybe Time.Posix) ))
+getRulesTimes : List RuleData -> ConcurrentTask String (List ( List (Maybe Time.Posix), RuleData, List (Maybe Time.Posix) ))
 getRulesTimes rules =
     rules
         |> List.map getRuleTimes
         |> ConcurrentTask.batch
 
 
-getRuleTimes : RuleData -> ConcurrentTask e ( List (Maybe Time.Posix), RuleData, List (Maybe Time.Posix) )
+getRuleTimes : RuleData -> ConcurrentTask String ( List (Maybe Time.Posix), RuleData, List (Maybe Time.Posix) )
 getRuleTimes rule =
     let
-        getTimes : Set Path -> ConcurrentTask x (List (Maybe Time.Posix))
+        getTimes : Set Path -> ConcurrentTask String (List (Maybe Time.Posix))
         getTimes set =
             set
                 |> Set.toList

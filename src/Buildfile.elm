@@ -1,6 +1,9 @@
 module Buildfile exposing (build)
 
+import Bytes exposing (Bytes)
 import Elm
+import Elm.Annotation
+import Image
 import Rule exposing (Rules)
 import TrackingTask exposing (TrackingTask)
 
@@ -15,13 +18,75 @@ build =
                     name =
                         getFileName path
                 in
-                Elm.declaration name <|
-                    Elm.string ("images/" ++ name ++ ".webp")
+                Elm.expose <|
+                    Elm.declaration name <|
+                        Elm.string ("images/" ++ name ++ ".webp")
             )
     , Rule.list images <|
         \path ->
             Rule.convert path ("images/" ++ getFileName path ++ ".webp")
+    , Rule.writeCodegenFile gradients [ "Gradients" ] <|
+        List.reverse
+            << List.map
+                (\( name, gradient ) ->
+                    let
+                        content : Elm.Expression
+                        content =
+                            case Image.decode gradient of
+                                Nothing ->
+                                    Elm.apply
+                                        (Elm.value
+                                            { importFrom = [ "Debug" ]
+                                            , name = "todo"
+                                            , annotation =
+                                                Just <|
+                                                    Elm.Annotation.function
+                                                        [ Elm.Annotation.string ]
+                                                        (Elm.Annotation.var "a")
+                                            }
+                                        )
+                                        [ Elm.string <| "Could not decode gradient: " ++ name ]
+
+                                Just decoded ->
+                                    Image.toList decoded
+                                        |> List.map
+                                            (\pixel ->
+                                                let
+                                                    r : Int
+                                                    r =
+                                                        modBy 256 <| pixel // (256 ^ 3)
+
+                                                    g : Int
+                                                    g =
+                                                        modBy 256 <| pixel // (256 ^ 2)
+
+                                                    b : Int
+                                                    b =
+                                                        modBy 256 <| pixel // (256 ^ 1)
+                                                in
+                                                Elm.triple (Elm.int r) (Elm.int g) (Elm.int b)
+                                            )
+                                        |> Elm.list
+                    in
+                    content
+                        |> Elm.declaration (String.replace "_g" "G" name)
+                        |> Elm.expose
+                )
     ]
+
+
+gradients : TrackingTask (List ( String, Bytes ))
+gradients =
+    Rule.listFiles "assets"
+        |> TrackingTask.map (List.filter (String.endsWith "_gradient.png"))
+        |> TrackingTask.andThen
+            (TrackingTask.combineMap
+                (\path ->
+                    TrackingTask.map
+                        (Tuple.pair (getFileName path))
+                        (Rule.readBinary path)
+                )
+            )
 
 
 getFileName : String -> String
@@ -49,10 +114,12 @@ images =
 
 isImage : String -> Bool
 isImage path =
-    String.endsWith ".png" path
-        || String.endsWith ".webp" path
-        || String.endsWith ".jpeg" path
-        || String.endsWith ".jpg" path
-        || String.endsWith ".git" path
-        || String.endsWith ".tif" path
-        || String.endsWith ".tiff" path
+    not (String.endsWith "_gradient.png" path)
+        && (String.endsWith ".png" path
+                || String.endsWith ".webp" path
+                || String.endsWith ".jpeg" path
+                || String.endsWith ".jpg" path
+                || String.endsWith ".git" path
+                || String.endsWith ".tif" path
+                || String.endsWith ".tiff" path
+           )

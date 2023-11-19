@@ -9,7 +9,7 @@ type alias Path =
 
 
 type Rules
-    = Rules (ConcurrentTask Never (List RuleData))
+    = Rules (ConcurrentTask String (List RuleData))
 
 
 type alias RuleData =
@@ -21,4 +21,4 @@ type alias RuleData =
 
 
 type TrackingTask a
-    = TrackingTask (ConcurrentTask Never ( List Path, a ))
+    = TrackingTask (ConcurrentTask String ( List Path, a ))

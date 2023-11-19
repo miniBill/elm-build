@@ -1,5 +1,7 @@
-module Rule exposing (Path, Rules, addInputs, batch, commands, convert, getMTime, getSize, list, listFiles, multiple, writeCodegenFile, writeFile)
+module Rule exposing (Path, Rules, addInputs, batch, commands, convert, getMTime, getSize, list, listFiles, multiple, readBinary, writeCodegenFile, writeFile)
 
+import Base64
+import Bytes exposing (Bytes)
 import ConcurrentTask exposing (ConcurrentTask)
 import Elm
 import Internal exposing (TrackingTask(..))
@@ -142,6 +144,26 @@ commandToString args =
     String.join " " <| List.map escapeArg args
 
 
+readBinary : String -> TrackingTask Bytes
+readBinary path =
+    { function = "readBinary"
+    , expect = ConcurrentTask.expectString
+    , errors = ConcurrentTask.expectNoErrors
+    , args = JE.string path
+    }
+        |> ConcurrentTask.define
+        |> ConcurrentTask.andThen
+            (\base64 ->
+                case Base64.toBytes base64 of
+                    Nothing ->
+                        ConcurrentTask.fail "Unable to decode base64 content from JS"
+
+                    Just bytes ->
+                        ConcurrentTask.succeed ( [ path ], bytes )
+            )
+        |> TrackingTask
+
+
 writeFile :
     Path
     -> TrackingTask a
@@ -229,7 +251,6 @@ statDecoder =
 multiple : TrackingTask a -> (a -> List Rules) -> Rules
 multiple (TrackingTask task) f =
     task
-        |> ConcurrentTask.mapError never
         |> ConcurrentTask.andThen
             (\( inputs, v ) ->
                 let

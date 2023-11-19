@@ -89,6 +89,10 @@ const tasks = {
     await promisify((cb) => fs.mkdir(dir, { recursive: true }, cb));
     await promisify((cb) => fs.writeFile(file.path, file.content, cb));
   },
+  async readBinary(file) {
+    const binary = await promisify((cb) => fs.readFile(file, cb));
+    return binary.toString("base64");
+  },
 };
 
 ConcurrentTask.register({

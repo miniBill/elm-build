@@ -66,8 +66,6 @@ combineMap f items =
         items
 
 
-toConcurrentTask : TrackingTask a -> ConcurrentTask e a
+toConcurrentTask : TrackingTask a -> ConcurrentTask String a
 toConcurrentTask (Internal.TrackingTask task) =
-    task
-        |> ConcurrentTask.mapError never
-        |> ConcurrentTask.map Tuple.second
+    ConcurrentTask.map Tuple.second task
