@@ -1,10 +1,9 @@
 {
   "name": "elm-build",
-  "packageManager": "yarn@4.0.2",
   "devDependencies": {
-    "elm-pages": "^3.0.7",
-    "elm-review": "^2.10.2",
-    "elm-watch": "^1.1.2"
+    "elm-pages": "^3.0.12",
+    "elm-review": "^2.11.1",
+    "elm-watch": "^2.0.0-beta.2"
   },
   "scripts": {
     "start": "./start.sh"
