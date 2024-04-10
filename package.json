@@ -11,8 +11,8 @@
   "main": "index.mjs",
   "type": "module",
   "dependencies": {
-    "@andrewmacmurray/elm-concurrent-task": "^1.0.0",
-    "chokidar": "^3.5.3"
+    "@andrewmacmurray/elm-concurrent-task": "^1.1.1",
+    "chokidar": "^3.6.0"
   },
   "license": "BSD-3-Clause"
 }
