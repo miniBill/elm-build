@@ -1,18 +1,26 @@
 {
-  "name": "elm-build",
-  "devDependencies": {
-    "elm-pages": "^3.0.19",
-    "elm-review": "^2.12.0",
-    "elm-watch": "^2.0.0-beta.3"
-  },
-  "scripts": {
-    "start": "./start.sh"
-  },
-  "main": "index.mjs",
-  "type": "module",
-  "dependencies": {
-    "@andrewmacmurray/elm-concurrent-task": "^1.1.1",
-    "chokidar": "^4.0.0"
-  },
-  "license": "BSD-3-Clause"
+    "name": "elm-build",
+    "devDependencies": {
+        "elm-pages": "^3.0.19",
+        "elm-review": "^2.12.0",
+        "elm-watch": "^2.0.0-beta.3"
+    },
+    "scripts": {
+        "start": "./start.sh"
+    },
+    "main": "index.mjs",
+    "type": "module",
+    "dependencies": {
+        "@andrewmacmurray/elm-concurrent-task": "^1.1.1",
+        "chokidar": "^4.0.0"
+    },
+    "license": "BSD-3-Clause",
+    "overrides": {
+        "elm-doc-preview": ">=6.0.0",
+        "cross-spawn": ">=7.0.3"
+    },
+    "resolutions": {
+        "elm-doc-preview": ">=6.0.0",
+        "cross-spawn": ">=7.0.3"
+    }
 }
