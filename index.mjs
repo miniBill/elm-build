@@ -1,6 +1,6 @@
 import { Elm } from "./build/main.mjs";
 import chokidar from "chokidar";
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import * as ConcurrentTask from "@andrewmacmurray/elm-concurrent-task";
 import path from "node:path";
 import child_process from "node:child_process";
@@ -24,12 +24,6 @@ app.ports.printAndExitSuccess.subscribe((message) => {
     process.exit(0);
 });
 
-function promisify(withCb) {
-    return new Promise((resolve, reject) =>
-        withCb((err, files) => (err ? reject(err) : resolve(files)))
-    );
-}
-
 const tasks = {
     log: console.log,
     exit({ exitCode }) {
@@ -51,9 +45,7 @@ const tasks = {
         return result;
     },
     async listFiles(dir) {
-        let names = await promisify((cb) =>
-            fs.readdir(dir, { recursive: true }, cb)
-        );
+        let names = await fs.readdir(dir, { recursive: true });
         return names.map((name) => path.join(dir, name));
     },
     chokidarWatch: (function () {
@@ -79,9 +71,7 @@ const tasks = {
     })(),
     async stat(path) {
         try {
-            const result = await promisify((cb) =>
-                fs.stat(path, { throwIfNoEntry: false }, cb)
-            );
+            const result = await fs.stat(path, { throwIfNoEntry: false });
             return result || null;
         } catch {
             return null;
@@ -89,11 +79,11 @@ const tasks = {
     },
     async writeFile(file) {
         const dir = path.dirname(file.path);
-        await promisify((cb) => fs.mkdir(dir, { recursive: true }, cb));
-        await promisify((cb) => fs.writeFile(file.path, file.content, cb));
+        await fs.mkdir(dir, { recursive: true });
+        await fs.writeFile(file.path, file.content);
     },
     async readBinary(file) {
-        const binary = await promisify((cb) => fs.readFile(file, cb));
+        const binary = await fs.readFile(file);
         return binary.toString("base64");
     },
 };
