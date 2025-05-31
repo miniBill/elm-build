@@ -6,6 +6,7 @@ import Cli.Option as Option exposing (Option, OptionalPositionalArgOption)
 import Cli.OptionsParser as OptionsParser
 import Cli.Program as Program
 import ConcurrentTask exposing (ConcurrentTask, Response(..))
+import ConcurrentTask.Extra
 import ConcurrentTask.Process
 import ConcurrentTask.Time
 import Internal exposing (RuleData)
@@ -80,7 +81,7 @@ buildFileOption =
 
 
 type alias Model =
-    { pool : ConcurrentTask.Pool Msg String Msg
+    { tasks : ConcurrentTask.Extra.Pool Msg
     , inner : InnerModel
     }
 
@@ -97,8 +98,9 @@ type InnerModel
 type Msg
     = WithoutTime InnerMsg
     | WithTime InnerMsg Time.Posix
-    | OnProgress ( ConcurrentTask.Pool Msg String Msg, Cmd Msg )
-    | OnComplete (ConcurrentTask.Response String Msg)
+    | OnProgress ( ConcurrentTask.Extra.Pool Msg, Cmd Msg )
+    | OnUnexpected ConcurrentTask.UnexpectedError
+    | OnComplete (Result String Msg)
 
 
 type InnerMsg
@@ -174,7 +176,7 @@ main =
 
 init : Program.FlagsIncludingArgv {} -> Options -> ( Model, Cmd Msg )
 init _ _ =
-    ( { pool = ConcurrentTask.pool
+    ( { tasks = ConcurrentTask.pool
       , inner = Initial
       }
     , Task.perform (\_ -> WithoutTime Build) (Process.sleep 0)
@@ -182,37 +184,34 @@ init _ _ =
 
 
 attempt :
-    { a | pool : ConcurrentTask.Pool Msg String Msg }
+    Model
     -> ConcurrentTask String Msg
-    -> ( { a | pool : ConcurrentTask.Pool Msg String Msg }, Cmd Msg )
+    -> ( Model, Cmd Msg )
 attempt model task =
-    let
-        ( newPool, cmd ) =
-            ConcurrentTask.attempt
-                { send = send
-                , pool = model.pool
-                , onComplete = OnComplete
-                }
-                task
-    in
-    ( { model | pool = newPool }, cmd )
+    ConcurrentTask.Extra.attempt
+        { send = send
+        , onUnexpected = OnUnexpected
+        }
+        OnComplete
+        task
+        model
 
 
 update : Options -> Msg -> Model -> ( Model, Cmd Msg )
 update options msg model =
     case ( msg, model.inner ) of
         ( OnProgress ( newPool, cmd ), _ ) ->
-            ( { model | pool = newPool }, cmd )
+            ( { model | tasks = newPool }, cmd )
 
-        ( OnComplete (UnexpectedError e), _ ) ->
+        ( OnUnexpected e, _ ) ->
             die ("Unexpected error: " ++ unexpectedErrorToString e)
                 |> attempt model
 
-        ( OnComplete (Error errorMsg), _ ) ->
+        ( OnComplete (Err errorMsg), _ ) ->
             die ("Unexpected error: " ++ errorMsg)
                 |> attempt model
 
-        ( OnComplete (Success submsg), _ ) ->
+        ( OnComplete (Ok submsg), _ ) ->
             update options submsg model
 
         ( WithoutTime inner, _ ) ->
@@ -643,5 +642,5 @@ subscriptions model =
             , receive = receive
             , onProgress = OnProgress
             }
-            model.pool
+            model.tasks
         ]
