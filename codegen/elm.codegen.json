@@ -1,0 +1,12 @@
+{
+    "elm-codegen-version": "0.6.3",
+    "codegen-helpers": {
+        "packages": {
+            "elm/core": "1.0.5",
+            "elm/html": "1.0.1"
+        },
+        "local": [
+            "../../elm-picture/src"
+        ]
+    }
+}

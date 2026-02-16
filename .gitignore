@@ -1,0 +1,5 @@
+.elm-pages
+codegen/Gen
+*.cpuprofile
+elm-stuff
+node_modules
