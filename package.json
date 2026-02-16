@@ -1,6 +1,9 @@
 {
-  "license": "BSD-3-Clause",
-  "devDependencies": {
-    "elm-pages": "^3.1.1"
-  }
+    "license": "BSD-3-Clause",
+    "devDependencies": {
+        "elm-pages": "^3.1.1"
+    },
+    "scripts": {
+        "start": "bunx elm-pages run src/Build.elm"
+    }
 }
