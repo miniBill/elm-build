@@ -410,7 +410,17 @@ execLog prefix cmd args =
 {-| -}
 commandLog : List String -> String -> List String -> BackendTask FatalError String
 commandLog prefix cmd args =
-    logCommand prefix cmd args (Script.command cmd args)
+    logCommand prefix
+        cmd
+        args
+        (Stream.commandWithOptions
+            (Stream.defaultCommandOptions |> Stream.withOutput Stream.PrintStderr)
+            cmd
+            args
+            |> Stream.read
+            |> BackendTask.map .body
+            |> BackendTask.allowFatal
+        )
 
 
 {-| -}
