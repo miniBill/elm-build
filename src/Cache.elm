@@ -131,9 +131,8 @@ andThen f (Monad m) =
 {-| -}
 fail : String -> Monad a
 fail msg =
-    triggerDebugger <|
-        \_ ->
-            Monad (\_ _ _ _ -> BackendTask.fail (FatalError.fromString msg))
+    triggerDebugger <| \_ ->
+    Monad (\_ _ _ _ -> BackendTask.fail (FatalError.fromString msg))
 
 
 {-| -}
@@ -152,20 +151,18 @@ input : Path -> (FileOrDirectory -> Monad a) -> Monad a
 input inputPath k =
     Monad
         (\deps _ prefix _ ->
-            Do.do (commandLog prefix "b3sum" [ Path.toString inputPath ]) <|
-                \body ->
-                    case inputHash body of
-                        Err e ->
-                            BackendTask.fail (FatalError.fromString e)
+            Do.do (commandLog prefix "b3sum" [ Path.toString inputPath ]) <| \body ->
+            case inputHash body of
+                Err e ->
+                    BackendTask.fail (FatalError.fromString e)
 
-                        Ok hash ->
-                            BackendTask.succeed ( hash, deps )
+                Ok hash ->
+                    BackendTask.succeed ( hash, deps )
         )
         |> andThen
             (\hash ->
-                derive {- "input" -} hash <|
-                    \target prefix buildPath ->
-                        execLog prefix "cp" [ Path.toString inputPath, hashToPath buildPath target ]
+                derive {- "input" -} hash <| \target prefix buildPath ->
+                execLog prefix "cp" [ Path.toString inputPath, hashToPath buildPath target ]
             )
         |> andThen k
 
@@ -182,24 +179,23 @@ inputs :
                 )
             )
 inputs inputPaths =
-    Do.do (commandLog [] "b3sum" (List.map Path.toString inputPaths)) <|
-        \body ->
-            List.map2
-                (\inputPath line ->
-                    case inputHash line of
-                        Ok hash ->
-                            ( inputPath
-                            , derive {- "inputs" -} hash <| \target prefix buildPath -> execLog prefix "cp" [ Path.toString inputPath, hashToPath buildPath target ]
-                            )
-                                |> Ok
+    Do.do (commandLog [] "b3sum" (List.map Path.toString inputPaths)) <| \body ->
+    List.map2
+        (\inputPath line ->
+            case inputHash line of
+                Ok hash ->
+                    ( inputPath
+                    , derive {- "inputs" -} hash <| \target prefix buildPath -> execLog prefix "cp" [ Path.toString inputPath, hashToPath buildPath target ]
+                    )
+                        |> Ok
 
-                        Err e ->
-                            Err (FatalError.fromString e)
-                )
-                inputPaths
-                (String.lines body)
-                |> Result.Extra.combine
-                |> BackendTask.fromResult
+                Err e ->
+                    Err (FatalError.fromString e)
+        )
+        inputPaths
+        (String.lines body)
+        |> Result.Extra.combine
+        |> BackendTask.fromResult
 
 
 derive :
@@ -238,24 +234,19 @@ derive {- description -} target inner =
                     tmp =
                         hashToTmp target
                 in
-                Do.exec "rm" [ "-rf", hashToPath buildPath tmp ] <|
-                    \_ ->
-                        Do.do
-                            (inner tmp prefix buildPath
-                                |> BackendTask.onError
-                                    (\e ->
-                                        Do.exec "rm" [ "-rf", hashToPath buildPath tmp ] <|
-                                            \_ ->
-                                                BackendTask.fail e
-                                    )
+                Do.exec "rm" [ "-rf", hashToPath buildPath tmp ] <| \_ ->
+                Do.do
+                    (inner tmp prefix buildPath
+                        |> BackendTask.onError
+                            (\e ->
+                                Do.exec "rm" [ "-rf", hashToPath buildPath tmp ] <| \_ ->
+                                BackendTask.fail e
                             )
-                        <|
-                            \_ ->
-                                Do.exec "mv" [ hashToPath buildPath tmp, hashToPath buildPath target ] <|
-                                    \_ ->
-                                        Do.exec "chmod" [ "-R", "a=rX", hashToPath buildPath target ] <|
-                                            \_ ->
-                                                BackendTask.succeed ( target, hashSetInsert target deps )
+                    )
+                <| \_ ->
+                Do.exec "mv" [ hashToPath buildPath tmp, hashToPath buildPath target ] <| \_ ->
+                Do.exec "chmod" [ "-R", "a=rX", hashToPath buildPath target ] <| \_ ->
+                BackendTask.succeed ( target, hashSetInsert target deps )
         )
 
 
@@ -287,49 +278,46 @@ combine files =
                     )
                 |> combineHashes
     in
-    derive {- "combine" -} outputHash <|
-        \target prefix buildPath ->
-            Do.do Env.parallelism <|
-                \parallelism ->
-                    let
-                        withOutput : List ( { hash : FileOrDirectory, filename : Path }, String )
-                        withOutput =
-                            files
-                                |> List.map
-                                    (\file ->
-                                        let
-                                            outputFilename : String
-                                            outputFilename =
-                                                hashToPath buildPath target
-                                                    ++ "/"
-                                                    ++ Path.toString file.filename
-                                        in
-                                        ( file, outputFilename )
-                                    )
+    derive {- "combine" -} outputHash <| \target prefix buildPath ->
+    Do.do Env.parallelism <| \parallelism ->
+    let
+        withOutput : List ( { hash : FileOrDirectory, filename : Path }, String )
+        withOutput =
+            files
+                |> List.map
+                    (\file ->
+                        let
+                            outputFilename : String
+                            outputFilename =
+                                hashToPath buildPath target
+                                    ++ "/"
+                                    ++ Path.toString file.filename
+                        in
+                        ( file, outputFilename )
+                    )
 
-                        dirs : List String
-                        dirs =
-                            withOutput
-                                |> List.map
-                                    (\( _, outputFilename ) ->
-                                        outputFilename
-                                            |> Path.path
-                                            |> Path.directory
-                                            |> Path.toString
-                                    )
-                                |> Set.fromList
-                                |> Set.toList
-                    in
-                    Do.do
-                        (dirs
-                            |> List.map (\dir -> execLog prefix "mkdir" [ "-p", dir ])
-                            |> BackendTask.Extra.combineBy_ parallelism
-                        )
-                    <|
-                        \_ ->
-                            withOutput
-                                |> List.map (\( file, outputFilename ) -> execLog prefix "cp" [ "-rl", hashToPath buildPath file.hash, outputFilename ])
-                                |> BackendTask.Extra.combineBy_ parallelism
+        dirs : List String
+        dirs =
+            withOutput
+                |> List.map
+                    (\( _, outputFilename ) ->
+                        outputFilename
+                            |> Path.path
+                            |> Path.directory
+                            |> Path.toString
+                    )
+                |> Set.fromList
+                |> Set.toList
+    in
+    Do.do
+        (dirs
+            |> List.map (\dir -> execLog prefix "mkdir" [ "-p", dir ])
+            |> BackendTask.Extra.combineBy_ parallelism
+        )
+    <| \_ ->
+    withOutput
+        |> List.map (\( file, outputFilename ) -> execLog prefix "cp" [ "-rl", hashToPath buildPath file.hash, outputFilename ])
+        |> BackendTask.Extra.combineBy_ parallelism
 
 
 {-| -}
@@ -340,16 +328,15 @@ pipeThrough cmd args hash k =
         outputHash =
             extendHashWith (cmd :: args) hash
     in
-    (derive {- (String.join " " ("pipeThrough" :: cmd :: args)) -} outputHash <|
-        \target prefix buildPath ->
-            BackendTask.Extra.timed
-                (String.join " " (prefix ++ "Piping" :: hashToPath buildPath hash :: "through" :: cmd :: args))
-                (String.join " " (prefix ++ "Piped " :: hashToPath buildPath hash :: "through" :: cmd :: args))
-                (Stream.fileRead (hashToPath buildPath hash)
-                    |> Stream.pipe (Stream.command cmd args)
-                    |> Stream.pipe (Stream.fileWrite (hashToPath buildPath target))
-                    |> Stream.run
-                )
+    (derive {- (String.join " " ("pipeThrough" :: cmd :: args)) -} outputHash <| \target prefix buildPath ->
+    BackendTask.Extra.timed
+        (String.join " " (prefix ++ "Piping" :: hashToPath buildPath hash :: "through" :: cmd :: args))
+        (String.join " " (prefix ++ "Piped " :: hashToPath buildPath hash :: "through" :: cmd :: args))
+        (Stream.fileRead (hashToPath buildPath hash)
+            |> Stream.pipe (Stream.command cmd args)
+            |> Stream.pipe (Stream.fileWrite (hashToPath buildPath target))
+            |> Stream.run
+        )
     )
         |> andThen k
 
@@ -366,11 +353,9 @@ commandInFolder cmd args hash k =
         outputHash =
             extendHashWith (cmd :: args) hash
     in
-    (derive {- (String.join " " ("commandInFolder" :: cmd :: args)) -} outputHash <|
-        \target prefix buildPath ->
-            Do.do (commandLog prefix cmd args |> BackendTask.inDir (hashToPath buildPath hash)) <|
-                \output ->
-                    BackendTask.allowFatal (Script.writeFile { path = hashToPath buildPath target, body = output })
+    (derive {- (String.join " " ("commandInFolder" :: cmd :: args)) -} outputHash <| \target prefix buildPath ->
+    Do.do (commandLog prefix cmd args |> BackendTask.inDir (hashToPath buildPath hash)) <| \output ->
+    BackendTask.allowFatal (Script.writeFile { path = hashToPath buildPath target, body = output })
     )
         |> andThen k
 
@@ -392,11 +377,9 @@ commandWithFile cmd args hash k =
         outputHash =
             extendHashWith (cmd :: args) hash
     in
-    (derive {- (String.join " " ("commandWithFile" :: cmd :: args)) -} outputHash <|
-        \target prefix buildPath ->
-            Do.do (commandLog prefix cmd (args ++ [ hashToPath buildPath hash ])) <|
-                \output ->
-                    BackendTask.allowFatal (Script.writeFile { path = hashToPath buildPath target, body = output })
+    (derive {- (String.join " " ("commandWithFile" :: cmd :: args)) -} outputHash <| \target prefix buildPath ->
+    Do.do (commandLog prefix cmd (args ++ [ hashToPath buildPath hash ])) <| \output ->
+    BackendTask.allowFatal (Script.writeFile { path = hashToPath buildPath target, body = output })
     )
         |> andThen k
 
@@ -443,13 +426,12 @@ withFile : FileOrDirectory -> (String -> Monad a) -> (a -> Monad b) -> Monad b
 withFile hash f k =
     Monad
         (\existing deps prefix buildPath ->
-            Do.allowFatal (File.rawFile (hashToPath buildPath hash)) <|
-                \raw ->
-                    let
-                        (Monad m) =
-                            f raw
-                    in
-                    m existing (hashSetInsert hash deps) prefix buildPath
+            Do.allowFatal (File.rawFile (hashToPath buildPath hash)) <| \raw ->
+            let
+                (Monad m) =
+                    f raw
+            in
+            m existing (hashSetInsert hash deps) prefix buildPath
         )
         |> andThen k
 
@@ -462,9 +444,8 @@ writeFile content k =
         hash =
             stringToHash content
     in
-    (derive {- "writeFile" -} hash <|
-        \target _ buildPath ->
-            BackendTask.allowFatal (Script.writeFile { path = hashToPath buildPath target, body = content })
+    (derive {- "writeFile" -} hash <| \target _ buildPath ->
+    BackendTask.allowFatal (Script.writeFile { path = hashToPath buildPath target, body = content })
     )
         |> andThen k
 
@@ -472,18 +453,17 @@ writeFile content k =
 {-| -}
 run : Path -> Monad FileOrDirectory -> BackendTask FatalError { output : Path, dependencies : List Path }
 run buildPath (Monad m) =
-    Do.do (listExisting buildPath) <|
-        \existing ->
-            m hashSetEmpty existing [] buildPath
-                |> BackendTask.map
-                    (\( output, deps ) ->
-                        { output = Path.path (hashToPath buildPath output)
-                        , dependencies =
-                            deps
-                                |> hashSetToList
-                                |> List.map (\raw -> raw |> hashToPath buildPath |> Path.path)
-                        }
-                    )
+    Do.do (listExisting buildPath) <| \existing ->
+    m hashSetEmpty existing [] buildPath
+        |> BackendTask.map
+            (\( output, deps ) ->
+                { output = Path.path (hashToPath buildPath output)
+                , dependencies =
+                    deps
+                        |> hashSetToList
+                        |> List.map (\raw -> raw |> hashToPath buildPath |> Path.path)
+                }
+            )
 
 
 listExisting : Path -> BackendTask FatalError HashSet
@@ -558,19 +538,18 @@ cpuCount : (Int -> Monad a) -> Monad a
 cpuCount k =
     Monad
         (\deps _ _ _ ->
-            Do.command "nproc" [ "--all" ] <|
-                \raw ->
-                    let
-                        trimmed : String
-                        trimmed =
-                            String.trim raw
-                    in
-                    case String.toInt trimmed of
-                        Nothing ->
-                            BackendTask.fail (FatalError.fromString ("Could not parse nproc output: " ++ Json.Encode.encode 0 (Json.Encode.string trimmed)))
+            Do.command "nproc" [ "--all" ] <| \raw ->
+            let
+                trimmed : String
+                trimmed =
+                    String.trim raw
+            in
+            case String.toInt trimmed of
+                Nothing ->
+                    BackendTask.fail (FatalError.fromString ("Could not parse nproc output: " ++ Json.Encode.encode 0 (Json.Encode.string trimmed)))
 
-                        Just n ->
-                            BackendTask.succeed ( n, deps )
+                Just n ->
+                    BackendTask.succeed ( n, deps )
         )
         |> andThen k
 
