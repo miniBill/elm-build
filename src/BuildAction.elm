@@ -115,7 +115,15 @@ type alias HashedFileWith a =
 
 getInputs : { a | inputDirectory : Path } -> BackendTask FatalError (List ( Path, Cache.Monad FileOrDirectory ))
 getInputs config =
-    Glob.fromString (Path.toString config.inputDirectory ++ "/**/*.*")
+    Glob.fromStringWithOptions
+        (let
+            defaultOptions : Glob.Options
+            defaultOptions =
+                Glob.defaultOptions
+         in
+         { defaultOptions | include = Glob.OnlyFiles }
+        )
+        (Path.toString config.inputDirectory ++ "/**")
         |> BackendTask.andThen
             (\found ->
                 found
