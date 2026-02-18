@@ -383,6 +383,9 @@ processFile config total index ( path, copyFile ) =
         Just "jpg" ->
             image "jpg"
 
+        Just "jpeg" ->
+            image "jpeg"
+
         Just "png" ->
             image "png"
 
