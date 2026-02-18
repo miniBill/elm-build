@@ -388,7 +388,11 @@ processFile config total index ( path, copyFile ) =
 
         Just "ttf" ->
             Cache.do copyFile <| \hash ->
-            processTtf relative hash
+            processFont relative hash
+
+        Just "otf" ->
+            Cache.do copyFile <| \hash ->
+            processFont relative hash
 
         Just "svg" ->
             Cache.do copyFile <| \hash ->
@@ -484,8 +488,8 @@ errorToString src deadEnds =
         |> String.concat
 
 
-processTtf : Path -> FileOrDirectory -> Cache.Monad (Maybe ProcessedFile)
-processTtf relative hash =
+processFont : Path -> FileOrDirectory -> Cache.Monad (Maybe ProcessedFile)
+processFont relative hash =
     let
         readFontData : String -> Cache.Monad ( String, { style : Style, weight : Weight } )
         readFontData familyAndStyle =
@@ -517,6 +521,9 @@ parseStyleAndWeight styleAndWeight =
                 Result.andThen
                     (\a ->
                         case e of
+                            "Normal" ->
+                                Ok a
+
                             "Italic" ->
                                 Ok { a | style = StyleItalic }
 
