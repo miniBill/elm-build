@@ -253,7 +253,7 @@ finally afterTask task =
     task
         |> BackendTask.onError
             (\e ->
-                afterTask |> BackendTask.map (\_ -> e)
+                afterTask |> BackendTask.andThen (\_ -> BackendTask.fail e)
             )
         |> BackendTask.andThen
             (\r ->
