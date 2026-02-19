@@ -55,6 +55,7 @@ import BackendTask.File as File
 import BackendTask.Stream as Stream
 import FNV1a
 import FastDict as Dict exposing (Dict)
+import FastSet as Set exposing (Set)
 import FatalError exposing (FatalError)
 import Hex
 import Json.Decode
@@ -62,7 +63,6 @@ import Json.Encode
 import Pages.Script as Script
 import Path exposing (Path)
 import Result.Extra
-import Set exposing (Set)
 
 
 {-| -}
