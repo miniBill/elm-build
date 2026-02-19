@@ -16,6 +16,7 @@
             "elm/time": "1.0.0",
             "elmcraft/core-extra": "2.2.0",
             "mdgriffith/elm-codegen": "6.0.1",
+            "miniBill/elm-fast-dict": "1.2.4",
             "miniBill/elm-parser-error-extra": "1.0.0",
             "miniBill/elm-rope": "1.1.0",
             "pithub/elm-parser-bug-workaround": "1.0.0",

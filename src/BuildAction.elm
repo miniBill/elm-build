@@ -428,7 +428,8 @@ processFile config total index ( path, copyFile ) =
             Cache.succeed (Just (ProcessedCss relative hash))
 
         _ ->
-            Cache.fail ("Don't know how to process " ++ Path.toString path)
+            Cache.succeed Nothing
+     -- Cache.fail ("Don't know how to process " ++ Path.toString path)
     )
         |> Cache.timed
             ("Processing " ++ Path.toString path)

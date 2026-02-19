@@ -53,9 +53,8 @@ import BackendTask.Do as Do
 import BackendTask.Extra
 import BackendTask.File as File
 import BackendTask.Stream as Stream
-import Dict
-import Dict.Extra
 import FNV1a
+import FastDict as Dict exposing (Dict)
 import FatalError exposing (FatalError)
 import Hex
 import Json.Decode
@@ -262,66 +261,98 @@ derive {- description -} target inner =
 --         |> BackendTask.allowFatal
 
 
+type Tree
+    = Tree
+        { files : Dict String FileOrDirectory
+        , directories : Dict String Tree
+        }
+
+
 {-| -}
 combine : List { filename : Path, hash : FileOrDirectory } -> Monad FileOrDirectory
 combine files =
+    files
+        |> buildTree
+        |> combineTree
+
+
+buildTree : List { filename : Path, hash : FileOrDirectory } -> Tree
+buildTree files =
     let
-        deduplicated : List { filename : Path, hash : FileOrDirectory }
-        deduplicated =
-            files
-                |> Dict.Extra.groupBy (\{ filename } -> Path.toString filename)
-                |> Dict.values
-                |> List.concatMap (List.take 1)
-                |> List.sortBy (\{ filename, hash } -> ( Path.toString filename, hashToString hash ))
+        emptyTree : Tree
+        emptyTree =
+            Tree { files = Dict.empty, directories = Dict.empty }
+
+        addFile : { filename : Path, hash : FileOrDirectory } -> Tree -> Tree
+        addFile file tree =
+            let
+                dir : List String
+                dir =
+                    file.filename
+                        |> Path.directory
+                        |> Path.toString
+                        |> String.split "/"
+
+                filename : String
+                filename =
+                    Path.filename file.filename
+            in
+            addFile_ dir filename file.hash tree
+
+        addFile_ : List String -> String -> FileOrDirectory -> Tree -> Tree
+        addFile_ dir filename hash (Tree tree) =
+            case dir of
+                [] ->
+                    Tree
+                        { files = Dict.insert filename hash tree.files
+                        , directories = tree.directories
+                        }
+
+                head :: tail ->
+                    Tree
+                        { files = tree.files
+                        , directories =
+                            Dict.update head
+                                (\found ->
+                                    found
+                                        |> Maybe.withDefault emptyTree
+                                        |> addFile_ tail filename hash
+                                        |> Just
+                                )
+                                tree.directories
+                        }
+    in
+    List.foldl addFile emptyTree files
+
+
+combineTree : Tree -> Monad FileOrDirectory
+combineTree (Tree tree) =
+    jobs <| \parallelism ->
+    do
+        (tree.directories
+            |> Dict.foldl (\filename subtree acc -> map (Tuple.pair filename) (combineTree subtree) :: acc) []
+            |> combineBy parallelism
+            |> map Dict.fromList
+        )
+    <| \subtrees ->
+    let
+        combined : Dict String FileOrDirectory
+        combined =
+            Dict.union tree.files subtrees
 
         outputHash : FileOrDirectory
         outputHash =
-            deduplicated
-                |> List.map
-                    (\{ filename, hash } ->
-                        extendHashWith [ Path.toString filename ] hash
-                    )
-                |> combineHashes
+            Dict.foldl
+                (\filename hash acc -> filename :: hashToString hash :: acc)
+                [ "combineTree" ]
+                combined
+                |> String.join "|"
+                |> stringToHash
     in
-    jobs <| \parallelism ->
     derive {- "combine" -} outputHash <| \{ prefix, buildPath } target ->
-    let
-        withOutput : List ( FileOrDirectory, String )
-        withOutput =
-            files
-                |> List.map
-                    (\file ->
-                        let
-                            outputFilename : String
-                            outputFilename =
-                                hashToPath buildPath target
-                                    ++ "/"
-                                    ++ Path.toString file.filename
-                        in
-                        ( file.hash, outputFilename )
-                    )
-
-        dirs : List String
-        dirs =
-            withOutput
-                |> List.map
-                    (\( _, outputFilename ) ->
-                        outputFilename
-                            |> Path.path
-                            |> Path.directory
-                            |> Path.toString
-                    )
-                |> Set.fromList
-                |> Set.toList
-    in
-    Do.do
-        (dirs
-            |> List.map (\dir -> execLog prefix "mkdir" [ "-p", dir ])
-            |> BackendTask.Extra.combineBy_ parallelism
-        )
-    <| \_ ->
-    withOutput
-        |> List.map (\( hash, outputFilename ) -> execLog prefix "cp" [ "-rl", hashToPath buildPath hash, outputFilename ])
+    Do.do (execLog prefix "mkdir" [ "-p", hashToPath buildPath target ]) <| \_ ->
+    combined
+        |> Dict.foldl (\outputFilename hash acc -> execLog prefix "cp" [ "-rl", hashToPath buildPath hash, hashToPath buildPath target ++ "/" ++ outputFilename ] :: acc) []
         |> BackendTask.Extra.combineBy_ parallelism
 
 
@@ -613,18 +644,6 @@ hashToString (Hash hash) =
 hashToTmp : FileOrDirectory -> FileOrDirectory
 hashToTmp (Hash hash) =
     Hash ("tmp-" ++ hash)
-
-
-combineHashes : List FileOrDirectory -> FileOrDirectory
-combineHashes deps =
-    let
-        h : String
-        h =
-            deps
-                |> List.map hashToString
-                |> String.join "|"
-    in
-    stringToHash h
 
 
 extendHashWith : List String -> FileOrDirectory -> FileOrDirectory
