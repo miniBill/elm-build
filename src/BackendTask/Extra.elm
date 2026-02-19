@@ -1,4 +1,4 @@
-module BackendTask.Extra exposing (combine, combineBy, combineBy_, profiling, sequence, sequence_, timed)
+module BackendTask.Extra exposing (combine, combineBy, combineBy_, finally, profiling, sequence, sequence_, timed)
 
 import Array exposing (Array)
 import BackendTask exposing (BackendTask)
@@ -245,4 +245,18 @@ profiling label t =
                 BackendTask.Custom.run "profileEnd" (Json.Encode.string label) (Json.Decode.succeed ())
                     |> BackendTask.allowFatal
                     |> BackendTask.map (\() -> res)
+            )
+
+
+finally : BackendTask e () -> BackendTask e a -> BackendTask e a
+finally afterTask task =
+    task
+        |> BackendTask.onError
+            (\e ->
+                afterTask |> BackendTask.map (\_ -> e)
+            )
+        |> BackendTask.andThen
+            (\r ->
+                afterTask
+                    |> BackendTask.map (\_ -> r)
             )

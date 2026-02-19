@@ -3,7 +3,7 @@ module Cache exposing
     , Monad, do, succeed, fail
     , writeFile, run
     , map, map2, andThen, combine, combineBy, each, sequence
-    , pipeThrough, commandWithFile, commandInFolder, withFile
+    , pipeThrough, commandWithFile, commandInReadonlyDirectory, commandInWritableDirectory, withFile
     , withPrefix, timed
     , jobs, triggerDebugger
     )
@@ -33,7 +33,7 @@ module Cache exposing
 
 ## Operations
 
-@docs pipeThrough, commandWithFile, commandInFolder, withFile
+@docs pipeThrough, commandWithFile, commandInReadonlyDirectory, commandInWritableDirectory, withFile
 
 
 ## Output control
@@ -404,28 +404,78 @@ pipeThrough cmd args hash k =
         |> andThen k
 
 
-{-| Run a command in a specific generated folder and save the result to a file.
+{-| Run a command in a specific generated directory and save the result to a file.
 
-**IMPORTANT**: The command should only read files from that folder, otherwise elm-build has no way to know when to re-run it.
+To avoid needing to copy files, the directory will be read-only. If you need a writable directory use `commandInWritableDirectory` instead.
+
+This models commands as pure functions: given the same directory contents and
+arguments, the command produces the same stdout. The temporary directory handles the
+implementation detail that many tools need to write intermediate files.
+
+**IMPORTANT**: The command should only read files from that directory,
+otherwise elm-build has no way to know when to re-run it.
 
 -}
-commandInFolder : String -> List String -> FileOrDirectory -> (FileOrDirectory -> Monad a) -> Monad a
-commandInFolder cmd args hash k =
+commandInReadonlyDirectory : String -> List String -> FileOrDirectory -> (FileOrDirectory -> Monad a) -> Monad a
+commandInReadonlyDirectory cmd args hash k =
     let
         outputHash : FileOrDirectory
         outputHash =
             extendHashWith (cmd :: args) hash
     in
-    (derive {- (String.join " " ("commandInFolder" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
+    (derive {- (String.join " " ("commandInReadonlyDirectory" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
     Do.do (commandLog prefix cmd args |> BackendTask.inDir (hashToPath buildPath hash)) <| \output ->
     BackendTask.allowFatal (Script.writeFile { path = hashToPath buildPath target, body = output })
     )
         |> andThen k
 
 
-{-| Run a command passing in a file (or folder) as last argument and save the result to a file.
+{-| Run a command in a writable temporary directory seeded from a cached directory.
 
-**IMPORTANT**: The command should only read that file or folder, otherwise elm-build has no way to know when to re-run it.
+Unlike `commandInReadonlyDirectory` (which runs in the read-only cached directory directly),
+this creates a writable copy so the command can create temporary files
+(like `elm-stuff/` during compilation). Only stdout is captured and cached;
+the temporary directory is discarded after the command completes.
+
+This models commands as pure functions: given the same directory contents and
+arguments, the command produces the same stdout. The temporary directory handles the
+implementation detail that many tools need to write intermediate files.
+
+**IMPORTANT**: The command should only read files from the temporary directory,
+otherwise elm-build has no way to know when to re-run it.
+
+-}
+commandInWritableDirectory : String -> List String -> FileOrDirectory -> (FileOrDirectory -> Monad a) -> Monad a
+commandInWritableDirectory cmd args hash k =
+    let
+        outputHash : FileOrDirectory
+        outputHash =
+            extendHashWith (cmd :: args) hash
+    in
+    (derive outputHash <| \{ prefix, buildPath } target ->
+    let
+        workspacePath : String
+        workspacePath =
+            hashToPath buildPath (hashToWorkspace target)
+    in
+    Do.exec "rm" [ "-rf", workspacePath ] <| \_ ->
+    Do.exec "cp" [ "-r", hashToPath buildPath hash, workspacePath ] <| \_ ->
+    Do.exec "chmod" [ "-R", "u+w", workspacePath ] <| \_ ->
+    Do.do
+        (commandLog prefix cmd args
+            |> BackendTask.inDir workspacePath
+            |> BackendTask.Extra.finally
+                (Script.exec "rm" [ "-rf", workspacePath ])
+        )
+    <| \output ->
+    BackendTask.allowFatal (Script.writeFile { path = hashToPath buildPath target, body = output })
+    )
+        |> andThen k
+
+
+{-| Run a command passing in a file (or directory) as last argument and save the result to a file.
+
+**IMPORTANT**: The command should only read that file or directory, otherwise elm-build has no way to know when to re-run it.
 
 -}
 commandWithFile :
@@ -705,6 +755,11 @@ hashToString (Hash hash) =
 hashToTmp : FileOrDirectory -> FileOrDirectory
 hashToTmp (Hash hash) =
     Hash ("tmp-" ++ hash)
+
+
+hashToWorkspace : FileOrDirectory -> FileOrDirectory
+hashToWorkspace (Hash hash) =
+    Hash ("workspace-" ++ hash)
 
 
 extendHashWith : List String -> FileOrDirectory -> FileOrDirectory
