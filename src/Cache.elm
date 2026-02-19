@@ -615,25 +615,56 @@ jobs k =
 
 jobs_ : Monad Int
 jobs_ =
-    Monad "jobs"
-        (\input_ deps ->
-            case input_.jobs of
-                Just j ->
-                    BackendTask.succeed ( j, deps )
-
-                Nothing ->
-                    Do.command "nproc" [ "--all" ] <| \raw ->
+    let
+        tryRunningOrElse :
+            String
+            -> List String
+            -> (() -> BackendTask FatalError Int)
+            -> BackendTask FatalError Int
+        tryRunningOrElse cmd args orElse =
+            Do.do (Script.command cmd args |> BackendTask.toResult) <| \nprocResult ->
+            case nprocResult of
+                Ok output ->
                     let
                         trimmed : String
                         trimmed =
-                            String.trim raw
+                            String.trim output
                     in
                     case String.toInt trimmed of
                         Nothing ->
-                            BackendTask.fail (FatalError.fromString ("Invalid nproc output: " ++ Json.Encode.encode 0 (Json.Encode.string trimmed)))
+                            let
+                                message : String
+                                message =
+                                    "Invalid " ++ String.join " " (cmd :: args) ++ " output: " ++ Json.Encode.encode 0 (Json.Encode.string trimmed)
+                            in
+                            BackendTask.fail (FatalError.fromString message)
 
-                        Just n ->
-                            BackendTask.succeed ( n, deps )
+                        Just j ->
+                            BackendTask.succeed j
+
+                Err _ ->
+                    orElse ()
+    in
+    Monad "jobs"
+        (\input_ deps ->
+            let
+                task : BackendTask FatalError Int
+                task =
+                    case input_.jobs of
+                        Just j ->
+                            BackendTask.succeed j
+
+                        Nothing ->
+                            tryRunningOrElse "nproc" [ "--all" ] <| \_ ->
+                            tryRunningOrElse "sysctl" [ "-n", "hw.logicalcpu" ] <| \_ ->
+                            let
+                                message : String
+                                message =
+                                    "Failed to run either `nproc --all` or `sysctl -n hw.logicalcpu`. You can work around this by specifying an explicit number of jobs to run in parallel"
+                            in
+                            BackendTask.fail (FatalError.fromString message)
+            in
+            task |> BackendTask.map (\j -> ( j, deps ))
         )
 
 
