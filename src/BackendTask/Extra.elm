@@ -1,5 +1,6 @@
-module BackendTask.Extra exposing (combineBy, combineBy_, profiling, timed)
+module BackendTask.Extra exposing (combine, combineBy, combineBy_, profiling, timed)
 
+import Array exposing (Array)
 import BackendTask exposing (BackendTask)
 import BackendTask.Custom
 import BackendTask.Do as Do
@@ -9,6 +10,7 @@ import Json.Decode
 import Json.Encode
 import List.Extra
 import Pages.Script.Spinner as Spinner
+import Rope exposing (Rope)
 import Time
 
 
@@ -71,7 +73,7 @@ combineBy n list =
     list
         |> List.Extra.greedyGroupsOf n
         |> List.map BackendTask.combine
-        |> BackendTask.sequence
+        |> sequence
         |> BackendTask.map List.concat
 
 
@@ -82,14 +84,124 @@ combineBy_ :
 combineBy_ n list =
     list
         |> List.Extra.greedyGroupsOf n
-        |> List.map BackendTask.combine
-        |> sequenceIgnore
-
-
-sequenceIgnore : List (BackendTask error (List ())) -> BackendTask error ()
-sequenceIgnore inputs =
-    List.foldr (\e acc -> acc |> BackendTask.andThen (\_ -> e)) (BackendTask.succeed []) inputs
+        |> List.map combineIgnore
+        |> sequence_
         |> BackendTask.map (\_ -> ())
+
+
+combineIgnore : List (BackendTask error a) -> BackendTask error ()
+combineIgnore inputs =
+    List.foldr (\e acc -> BackendTask.map2 always e acc) (BackendTask.succeed ()) inputs
+        |> BackendTask.map (\_ -> ())
+
+
+combine : List (BackendTask error a) -> BackendTask error (List a)
+combine inputs =
+    let
+        arr : Array (BackendTask error a)
+        arr =
+            Array.fromList inputs
+
+        go : Int -> Int -> BackendTask error (Rope a)
+        go fromIncluded toExcluded =
+            let
+                sliceSize : number
+                sliceSize =
+                    toExcluded - fromIncluded
+            in
+            if sliceSize > 16 then
+                let
+                    mid : Int
+                    mid =
+                        fromIncluded + sliceSize // 2
+                in
+                BackendTask.map2 Rope.appendTo
+                    (go fromIncluded mid)
+                    (go mid toExcluded)
+
+            else
+                arr
+                    |> Array.slice fromIncluded toExcluded
+                    |> Array.toList
+                    |> BackendTask.combine
+                    |> BackendTask.map Rope.fromList
+    in
+    go 0 (Array.length arr)
+        |> BackendTask.map Rope.toList
+
+
+sequence : List (BackendTask error a) -> BackendTask error (List a)
+sequence inputs =
+    let
+        arr : Array (BackendTask error a)
+        arr =
+            Array.fromList inputs
+
+        go : Int -> Int -> BackendTask error (Rope a)
+        go fromIncluded toExcluded =
+            let
+                sliceSize : number
+                sliceSize =
+                    toExcluded - fromIncluded
+            in
+            if sliceSize > 16 then
+                let
+                    mid : Int
+                    mid =
+                        fromIncluded + sliceSize // 2
+                in
+                go fromIncluded mid
+                    |> BackendTask.andThen
+                        (\b ->
+                            BackendTask.map (Rope.prependTo b)
+                                (go mid toExcluded)
+                        )
+
+            else
+                arr
+                    |> Array.slice fromIncluded toExcluded
+                    |> Array.toList
+                    |> BackendTask.sequence
+                    |> BackendTask.map Rope.fromList
+    in
+    go 0 (Array.length arr)
+        |> BackendTask.map Rope.toList
+
+
+sequence_ : List (BackendTask error ()) -> BackendTask a ()
+sequence_ inputs =
+    let
+        arr : Array (BackendTask error ())
+        arr =
+            Array.fromList inputs
+
+        go : Int -> Int -> BackendTask error ()
+        go fromIncluded toExcluded =
+            let
+                sliceSize : number
+                sliceSize =
+                    toExcluded - fromIncluded
+            in
+            if sliceSize > 16 then
+                let
+                    mid : Int
+                    mid =
+                        fromIncluded + sliceSize // 2
+                in
+                go fromIncluded mid
+                    |> BackendTask.andThen
+                        (\_ ->
+                            go mid toExcluded
+                        )
+
+            else
+                arr
+                    |> Array.slice fromIncluded toExcluded
+                    |> Array.toList
+                    |> BackendTask.sequence
+                    |> BackendTask.map (\_ -> ())
+    in
+    go 0 (Array.length arr)
 
 
 profiling : String -> BackendTask FatalError a -> BackendTask FatalError a
