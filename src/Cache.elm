@@ -47,6 +47,7 @@ module Cache exposing
 
 -}
 
+import Array exposing (Array)
 import BackendTask exposing (BackendTask)
 import BackendTask.Custom
 import BackendTask.Do as Do
@@ -592,7 +593,7 @@ listExisting path =
         |> BackendTask.allowFatal
         |> BackendTask.map
             (\raw ->
-                HashSet (Set.fromList raw)
+                HashSet (innerHashSetFromList raw)
             )
 
 
@@ -781,29 +782,165 @@ stringToHash raw =
 
 
 type HashSet
-    = HashSet (Set String)
+    = HashSet (BST String)
+
+
+type BST a
+    = BSTNode a (BST a) (BST a)
+    | BSTLeaf
 
 
 hashSetEmpty : HashSet
 hashSetEmpty =
-    HashSet Set.empty
+    HashSet BSTLeaf
 
 
 hashSetMember : FileOrDirectory -> HashSet -> Bool
 hashSetMember (Hash x) (HashSet s) =
-    Set.member x s
+    innerHashSetMember x s
+
+
+innerHashSetMember : comparable -> BST comparable -> Bool
+innerHashSetMember k t =
+    case t of
+        BSTLeaf ->
+            False
+
+        BSTNode nk l r ->
+            case compare k nk of
+                EQ ->
+                    True
+
+                LT ->
+                    innerHashSetMember k l
+
+                GT ->
+                    innerHashSetMember k r
 
 
 hashSetInsert : FileOrDirectory -> HashSet -> HashSet
 hashSetInsert (Hash x) (HashSet s) =
-    HashSet (Set.insert x s)
+    HashSet (innerHashSetInsert x s |> Maybe.withDefault s)
+
+
+innerHashSetInsert : comparable -> BST comparable -> Maybe (BST comparable)
+innerHashSetInsert k t =
+    case t of
+        BSTLeaf ->
+            Just (BSTNode k BSTLeaf BSTLeaf)
+
+        BSTNode nk l r ->
+            case compare k nk of
+                EQ ->
+                    Nothing
+
+                LT ->
+                    case innerHashSetInsert k l of
+                        Nothing ->
+                            Nothing
+
+                        Just nl ->
+                            Just (BSTNode nk nl r)
+
+                GT ->
+                    case innerHashSetInsert k r of
+                        Nothing ->
+                            Nothing
+
+                        Just nr ->
+                            Just (BSTNode nk l nr)
 
 
 hashSetUnion : HashSet -> HashSet -> HashSet
 hashSetUnion (HashSet a) (HashSet b) =
-    HashSet (Set.union a b)
+    HashSet (innerHashSetUnion a b)
+
+
+innerHashSetUnion : BST comparable -> BST comparable -> BST comparable
+innerHashSetUnion l r =
+    case l of
+        BSTLeaf ->
+            r
+
+        BSTNode lk ll lr ->
+            let
+                ( rl, rr ) =
+                    split lk r
+            in
+            BSTNode lk (innerHashSetUnion ll rl) (innerHashSetUnion lr rr)
+
+
+split : comparable -> BST comparable -> ( BST comparable, BST comparable )
+split k t =
+    case t of
+        BSTLeaf ->
+            ( BSTLeaf, BSTLeaf )
+
+        BSTNode nk l r ->
+            case compare k nk of
+                EQ ->
+                    ( l, r )
+
+                LT ->
+                    let
+                        ( ll, lr ) =
+                            split k l
+                    in
+                    ( ll, BSTNode nk lr r )
+
+                GT ->
+                    let
+                        ( rl, rr ) =
+                            split k r
+                    in
+                    ( BSTNode nk l rl, rr )
 
 
 hashSetToList : HashSet -> List FileOrDirectory
 hashSetToList (HashSet s) =
-    Set.foldr (\e a -> Hash e :: a) [] s
+    innerHashSetToList s
+        |> List.map Hash
+
+
+innerHashSetToList : BST a -> List a
+innerHashSetToList s =
+    let
+        go : BST a -> List a -> List a
+        go t acc =
+            case t of
+                BSTLeaf ->
+                    acc
+
+                BSTNode k l r ->
+                    go l acc
+                        |> (::) k
+                        |> go r
+    in
+    go s []
+
+
+innerHashSetFromList : List comparable -> BST comparable
+innerHashSetFromList list =
+    let
+        arr : Array comparable
+        arr =
+            Array.fromList (List.sort list)
+
+        go fromIncluded toExcluded =
+            if fromIncluded >= toExcluded then
+                BSTLeaf
+
+            else
+                let
+                    mid : Int
+                    mid =
+                        fromIncluded + (toExcluded - fromIncluded) // 2
+                in
+                case Array.get mid arr of
+                    Nothing ->
+                        BSTLeaf
+
+                    Just k ->
+                        BSTNode k (go fromIncluded mid) (go (mid + 1) toExcluded)
+    in
+    go 0 (Array.length arr)
