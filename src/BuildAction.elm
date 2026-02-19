@@ -149,29 +149,25 @@ buildAction config inputs =
                 )
             <| \v ->
             k (Maybe.Extra.values v)
-
-        fileCopy : List ProcessedFile -> Cache.Monad FileOrDirectory
-        fileCopy processedFiles =
-            elmCodegen (imagesElmFile processedFiles) <| \imagesElm ->
-            elmCodegen (fontsElmFile processedFiles) <| \fontsElm ->
-            fontsCssFile processedFiles <| \fontsCss ->
-            Cache.do
-                (processedFiles
-                    |> List.concatMap processedFileToFileList
-                    |> (::) fontsCss
-                    |> Cache.combine
-                    |> Cache.withPrefix ("[" ++ String.fromInt inputSize ++ "/" ++ String.fromInt inputSize ++ "]")
-                )
-            <| \public ->
-            Cache.combine
-                [ imagesElm
-                , fontsElm
-                , { filename = Path.path "public", hash = public }
-                ]
     in
     Cache.jobs <| \parallelism ->
     processFilesTask parallelism <| \processedFiles ->
-    fileCopy processedFiles
+    elmCodegen (imagesElmFile processedFiles) <| \imagesElm ->
+    elmCodegen (fontsElmFile processedFiles) <| \fontsElm ->
+    fontsCssFile processedFiles <| \fontsCss ->
+    Cache.do
+        (processedFiles
+            |> List.concatMap processedFileToFileList
+            |> (::) fontsCss
+            |> Cache.combine
+            |> Cache.withPrefix ("[" ++ String.fromInt inputSize ++ "/" ++ String.fromInt inputSize ++ "]")
+        )
+    <| \public ->
+    Cache.combine
+        [ imagesElm
+        , fontsElm
+        , { filename = Path.path "public", hash = public }
+        ]
 
 
 fontsCssFile :
