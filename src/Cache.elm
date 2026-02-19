@@ -533,12 +533,14 @@ combineBy n ops =
                     (\i (Monad m) -> BackendTask.map (Tuple.pair i) (m input_ deps))
                 |> BackendTask.Extra.combineBy n
                 |> BackendTask.map
-                    (\res ->
-                        res
-                            |> List.sortBy Tuple.first
-                            |> List.map Tuple.second
-                            |> List.unzip
-                            |> Tuple.mapSecond (List.foldl hashSetUnion hashSetEmpty)
+                    (\resList ->
+                        resList
+                            |> List.sortBy (\( i, _ ) -> -i)
+                            |> List.foldl
+                                (\( _, ( res, newDeps ) ) ( resAcc, depsAcc ) ->
+                                    ( res :: resAcc, hashSetUnion newDeps depsAcc )
+                                )
+                                ( [], hashSetEmpty )
                     )
         )
 
