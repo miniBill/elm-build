@@ -94,29 +94,37 @@ task config =
         <| \_ ->
         Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Output: " ++ Path.toString combined.output) <| \_ ->
         Do.glob (Path.toString config.buildDirectory ++ "/*") <| \actualList ->
+        let
+            expected : Set String
+            expected =
+                combined.dependencies
+                    |> List.map Path.toString
+                    |> Set.fromList
+
+            actual : Set String
+            actual =
+                Set.fromList actualList
+
+            unexpected : Set String
+            unexpected =
+                Set.diff actual expected
+        in
         if config.removeStale then
-            let
-                expected : Set String
-                expected =
-                    combined.dependencies
-                        |> List.map Path.toString
-                        |> Set.fromList
-
-                actual : Set String
-                actual =
-                    Set.fromList actualList
-
-                unexpected : Set String
-                unexpected =
-                    Set.diff actual expected
-            in
             Do.log ("Removing " ++ String.fromInt (Set.size unexpected) ++ " files from the build directory") <| \_ ->
-            Do.each (Set.toList unexpected) (\i -> Script.exec "chmod" [ "-R", "700", i ]) <| \_ ->
-            Do.each (Set.toList unexpected) (\i -> Script.exec "rm" [ "-rf", i ]) <| \_ ->
-            Do.noop
+            Do.do
+                (Set.toList unexpected
+                    |> List.map
+                        (\i ->
+                            Do.exec "chmod" [ "-R", "700", i ] <| \_ ->
+                            Script.exec "rm" [ "-rf", i ]
+                        )
+                    |> BackendTask.Extra.sequence_
+                )
+            <| \_ ->
+            Script.log "Build done"
 
         else
-            Do.noop
+            Script.log (String.fromInt (Set.size unexpected) ++ " stale files in the build directory")
 
 
 symlink_ : { source : Path, target : Path } -> (() -> BackendTask FatalError a) -> BackendTask FatalError a

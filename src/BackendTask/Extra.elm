@@ -1,4 +1,4 @@
-module BackendTask.Extra exposing (combine, combineBy, combineBy_, profiling, timed)
+module BackendTask.Extra exposing (combine, combineBy, combineBy_, profiling, sequence, sequence_, timed)
 
 import Array exposing (Array)
 import BackendTask exposing (BackendTask)
