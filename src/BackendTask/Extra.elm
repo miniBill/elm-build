@@ -178,7 +178,7 @@ sequence_ inputs =
         go : Int -> Int -> BackendTask error ()
         go fromIncluded toExcluded =
             let
-                sliceSize : number
+                sliceSize : Int
                 sliceSize =
                     toExcluded - fromIncluded
             in
