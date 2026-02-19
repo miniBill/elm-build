@@ -634,15 +634,19 @@ sequence : List (Monad a) -> Monad (List a)
 sequence ops =
     Monad "sequence"
         (\input_ deps ->
-            ops
-                |> List.map (\m -> runMonad m input_ deps)
-                |> BackendTask.sequence
-                |> BackendTask.map
-                    (\res ->
-                        res
-                            |> List.unzip
-                            |> Tuple.mapSecond (List.foldl hashSetUnion hashSetEmpty)
-                    )
+            if List.isEmpty ops then
+                BackendTask.succeed ( [], deps )
+
+            else
+                ops
+                    |> List.map (\m -> runMonad m input_ deps)
+                    |> BackendTask.sequence
+                    |> BackendTask.map
+                        (\res ->
+                            res
+                                |> List.unzip
+                                |> Tuple.mapSecond (List.foldl hashSetUnion hashSetEmpty)
+                        )
         )
 
 
