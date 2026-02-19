@@ -68,6 +68,7 @@ import Set exposing (Set)
 {-| -}
 type Monad a
     = Monad
+        String
         (Input
          -> HashSet -- deps
          -> BackendTask FatalError ( a, HashSet )
@@ -85,15 +86,28 @@ type alias Input =
 {-| -}
 succeed : a -> Monad a
 succeed v =
-    Monad (\_ deps -> BackendTask.succeed ( v, deps ))
+    Monad "succeed" (\_ deps -> BackendTask.succeed ( v, deps ))
+
+
+runMonad : Monad a -> Input -> HashSet -> BackendTask FatalError ( a, HashSet )
+runMonad (Monad label m) input_ deps =
+    m input_ deps
+        |> BackendTask.andThen
+            (\( v, newDeps ) ->
+                if hashSetToList (hashSetUnion deps newDeps) == hashSetToList newDeps then
+                    BackendTask.succeed ( v, newDeps )
+
+                else
+                    BackendTask.fail (FatalError.fromString ("Missed dependency inside " ++ label))
+            )
 
 
 {-| -}
 map : (a -> b) -> Monad a -> Monad b
-map f (Monad m) =
-    Monad
+map f m =
+    Monad "map"
         (\input_ deps ->
-            m input_ deps
+            runMonad m input_ deps
                 |> BackendTask.map
                     (\( v, newDeps ) ->
                         ( f v, newDeps )
@@ -103,31 +117,27 @@ map f (Monad m) =
 
 {-| -}
 map2 : (a -> b -> c) -> Monad a -> Monad b -> Monad c
-map2 f (Monad a) (Monad b) =
-    Monad
+map2 f a b =
+    Monad "map2"
         (\input_ deps ->
             BackendTask.map2
                 (\( va, depsA ) ( vb, depsB ) ->
                     ( f va vb, hashSetUnion depsA depsB )
                 )
-                (a input_ deps)
-                (b input_ deps)
+                (runMonad a input_ deps)
+                (runMonad b input_ deps)
         )
 
 
 {-| -}
 andThen : (a -> Monad b) -> Monad a -> Monad b
-andThen f (Monad m) =
-    Monad
+andThen f m =
+    Monad "andThen"
         (\input_ deps ->
-            m input_ deps
+            runMonad m input_ deps
                 |> BackendTask.andThen
                     (\( v, newDeps ) ->
-                        let
-                            (Monad n) =
-                                f v
-                        in
-                        n input_ newDeps
+                        runMonad (f v) input_ newDeps
                     )
         )
 
@@ -136,13 +146,13 @@ andThen f (Monad m) =
 fail : String -> Monad a
 fail msg =
     triggerDebugger <| \_ ->
-    Monad (\_ _ -> BackendTask.fail (FatalError.fromString msg))
+    Monad "fail" (\_ _ -> BackendTask.fail (FatalError.fromString msg))
 
 
 {-| -}
 triggerDebugger : (() -> Monad a) -> Monad a
 triggerDebugger k =
-    Monad
+    Monad "triggerDebugger"
         (\_ deps ->
             BackendTask.Custom.run "triggerDebugger" Json.Encode.null (Json.Decode.succeed ( (), deps ))
                 |> BackendTask.allowFatal
@@ -153,7 +163,7 @@ triggerDebugger k =
 {-| -}
 input : Path -> (FileOrDirectory -> Monad a) -> Monad a
 input inputPath k =
-    Monad
+    Monad "input"
         (\{ prefix } deps ->
             Do.do (commandLog prefix "b3sum" [ Path.toString inputPath ]) <| \body ->
             case inputHash body of
@@ -213,8 +223,13 @@ derive :
         )
     -> Monad FileOrDirectory
 derive {- description -} target inner =
-    Monad
+    Monad "derive"
         (\({ existing, buildPath } as input_) deps ->
+            let
+                newDeps : HashSet
+                newDeps =
+                    hashSetInsert target deps
+            in
             -- Do.do
             --     (appendLog
             --         (hashToPath path   target
@@ -230,7 +245,7 @@ derive {- description -} target inner =
             --     )
             -- <| \_ ->
             if hashSetMember target existing || hashSetMember target deps then
-                BackendTask.succeed ( target, hashSetInsert target deps )
+                BackendTask.succeed ( target, newDeps )
 
             else
                 let
@@ -250,7 +265,7 @@ derive {- description -} target inner =
                 <| \_ ->
                 Do.exec "mv" [ hashToPath buildPath tmp, hashToPath buildPath target ] <| \_ ->
                 Do.exec "chmod" [ "-R", "a=rX", hashToPath buildPath target ] <| \_ ->
-                BackendTask.succeed ( target, hashSetInsert target deps )
+                BackendTask.succeed ( target, newDeps )
         )
 
 
@@ -463,14 +478,10 @@ do x f =
 {-| -}
 withFile : FileOrDirectory -> (String -> Monad a) -> (a -> Monad b) -> Monad b
 withFile hash f k =
-    Monad
+    Monad "withFile"
         (\({ buildPath } as input_) deps ->
             Do.allowFatal (File.rawFile (hashToPath buildPath hash)) <| \raw ->
-            let
-                (Monad m) =
-                    f raw
-            in
-            m input_ (hashSetInsert hash deps)
+            runMonad (f raw) input_ (hashSetInsert hash deps)
         )
         |> andThen k
 
@@ -491,7 +502,7 @@ writeFile content k =
 
 {-| -}
 run : { jobs : Maybe Int } -> Path -> Monad FileOrDirectory -> BackendTask FatalError { output : Path, dependencies : List Path }
-run config buildPath (Monad m) =
+run config buildPath m =
     Do.do (listExisting buildPath) <| \existing ->
     let
         input_ : Input
@@ -502,7 +513,7 @@ run config buildPath (Monad m) =
             , jobs = config.jobs
             }
     in
-    m input_ hashSetEmpty
+    runMonad m input_ hashSetEmpty
         |> BackendTask.map
             (\( output, deps ) ->
                 { output = Path.path (hashToPath buildPath output)
@@ -529,22 +540,27 @@ listExisting path =
 {-| -}
 combineBy : Int -> List (Monad a) -> Monad (List a)
 combineBy n ops =
-    Monad
+    Monad "combineBy"
         (\input_ deps ->
-            ops
-                |> List.indexedMap
-                    (\i (Monad m) -> BackendTask.map (Tuple.pair i) (m input_ deps))
-                |> BackendTask.Extra.combineBy n
-                |> BackendTask.map
-                    (\resList ->
-                        resList
-                            |> List.sortBy (\( i, _ ) -> -i)
-                            |> List.foldl
-                                (\( _, ( res, newDeps ) ) ( resAcc, depsAcc ) ->
-                                    ( res :: resAcc, hashSetUnion newDeps depsAcc )
-                                )
-                                ( [], hashSetEmpty )
-                    )
+            case ops of
+                [] ->
+                    BackendTask.succeed ( [], deps )
+
+                _ ->
+                    ops
+                        |> List.indexedMap
+                            (\i m -> BackendTask.map (Tuple.pair i) (runMonad m input_ deps))
+                        |> BackendTask.Extra.combineBy n
+                        |> BackendTask.map
+                            (\resList ->
+                                resList
+                                    |> List.sortBy (\( i, _ ) -> -i)
+                                    |> List.foldl
+                                        (\( _, ( res, newDeps ) ) ( resAcc, depsAcc ) ->
+                                            ( res :: resAcc, hashSetUnion newDeps depsAcc )
+                                        )
+                                        ( [], hashSetEmpty )
+                            )
         )
 
 
@@ -557,10 +573,10 @@ each l f k =
 {-| -}
 sequence : List (Monad a) -> Monad (List a)
 sequence ops =
-    Monad
+    Monad "sequence"
         (\input_ deps ->
             ops
-                |> List.map (\(Monad m) -> m input_ deps)
+                |> List.map (\m -> runMonad m input_ deps)
                 |> BackendTask.sequence
                 |> BackendTask.map
                     (\res ->
@@ -573,14 +589,14 @@ sequence ops =
 
 {-| -}
 timed : String -> String -> Monad a -> Monad a
-timed before after (Monad task) =
-    Monad (\input_ deps -> BackendTask.Extra.timed before after (task input_ deps))
+timed before after task =
+    Monad "timed" (\input_ deps -> BackendTask.Extra.timed before after (runMonad task input_ deps))
 
 
 {-| -}
 withPrefix : String -> Monad a -> Monad a
-withPrefix newPrefix (Monad m) =
-    Monad (\input_ deps -> m { input_ | prefix = newPrefix :: input_.prefix } deps)
+withPrefix newPrefix m =
+    Monad "withPrefix" (\input_ deps -> runMonad m { input_ | prefix = newPrefix :: input_.prefix } deps)
 
 
 jobs : (Int -> Monad a) -> Monad a
@@ -590,7 +606,7 @@ jobs k =
 
 jobs_ : Monad Int
 jobs_ =
-    Monad
+    Monad "jobs"
         (\input_ deps ->
             case input_.jobs of
                 Just j ->
