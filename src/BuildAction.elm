@@ -169,7 +169,7 @@ buildAction config inputs =
                 , { filename = Path.path "public", hash = public }
                 ]
     in
-    Cache.cpuCount <| \parallelism ->
+    Cache.jobs <| \parallelism ->
     processFilesTask parallelism <| \processedFiles ->
     fileCopy processedFiles
 

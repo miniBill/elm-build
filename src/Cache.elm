@@ -5,7 +5,7 @@ module Cache exposing
     , map, map2, andThen, combine, combineBy, each, sequence
     , pipeThrough, commandWithFile, commandInFolder, withFile
     , withPrefix, timed
-    , cpuCount, triggerDebugger
+    , jobs, triggerDebugger
     )
 
 {-|
@@ -43,7 +43,7 @@ module Cache exposing
 
 ## Utils
 
-@docs cpuCount, triggerDebugger
+@docs jobs, triggerDebugger
 
 -}
 
@@ -55,7 +55,6 @@ import BackendTask.File as File
 import BackendTask.Stream as Stream
 import Dict
 import Dict.Extra
-import Env
 import FNV1a
 import FatalError exposing (FatalError)
 import Hex
@@ -70,26 +69,32 @@ import Set exposing (Set)
 {-| -}
 type Monad a
     = Monad
-        (HashSet -- deps
-         -> HashSet -- existing
-         -> List String
-         -> Path
+        (Input
+         -> HashSet -- deps
          -> BackendTask FatalError ( a, HashSet )
         )
+
+
+type alias Input =
+    { existing : HashSet
+    , prefix : List String
+    , buildPath : Path
+    , jobs : Maybe Int
+    }
 
 
 {-| -}
 succeed : a -> Monad a
 succeed v =
-    Monad (\deps _ _ _ -> BackendTask.succeed ( v, deps ))
+    Monad (\_ deps -> BackendTask.succeed ( v, deps ))
 
 
 {-| -}
 map : (a -> b) -> Monad a -> Monad b
 map f (Monad m) =
     Monad
-        (\deps existing prefix path ->
-            m deps existing prefix path
+        (\input_ deps ->
+            m input_ deps
                 |> BackendTask.map
                     (\( v, newDeps ) ->
                         ( f v, newDeps )
@@ -101,13 +106,13 @@ map f (Monad m) =
 map2 : (a -> b -> c) -> Monad a -> Monad b -> Monad c
 map2 f (Monad a) (Monad b) =
     Monad
-        (\deps existing prefix path ->
+        (\input_ deps ->
             BackendTask.map2
                 (\( va, depsA ) ( vb, depsB ) ->
                     ( f va vb, hashSetUnion depsA depsB )
                 )
-                (a deps existing prefix path)
-                (b deps existing prefix path)
+                (a input_ deps)
+                (b input_ deps)
         )
 
 
@@ -115,15 +120,15 @@ map2 f (Monad a) (Monad b) =
 andThen : (a -> Monad b) -> Monad a -> Monad b
 andThen f (Monad m) =
     Monad
-        (\deps existing prefix buildPath ->
-            m deps existing prefix buildPath
+        (\input_ deps ->
+            m input_ deps
                 |> BackendTask.andThen
                     (\( v, newDeps ) ->
                         let
                             (Monad n) =
                                 f v
                         in
-                        n newDeps existing prefix buildPath
+                        n input_ newDeps
                     )
         )
 
@@ -132,14 +137,14 @@ andThen f (Monad m) =
 fail : String -> Monad a
 fail msg =
     triggerDebugger <| \_ ->
-    Monad (\_ _ _ _ -> BackendTask.fail (FatalError.fromString msg))
+    Monad (\_ _ -> BackendTask.fail (FatalError.fromString msg))
 
 
 {-| -}
 triggerDebugger : (() -> Monad a) -> Monad a
 triggerDebugger k =
     Monad
-        (\deps _ _ _ ->
+        (\_ deps ->
             BackendTask.Custom.run "triggerDebugger" Json.Encode.null (Json.Decode.succeed ( (), deps ))
                 |> BackendTask.allowFatal
         )
@@ -150,7 +155,7 @@ triggerDebugger k =
 input : Path -> (FileOrDirectory -> Monad a) -> Monad a
 input inputPath k =
     Monad
-        (\deps _ prefix _ ->
+        (\{ prefix } deps ->
             Do.do (commandLog prefix "b3sum" [ Path.toString inputPath ]) <| \body ->
             case inputHash body of
                 Err e ->
@@ -161,7 +166,7 @@ input inputPath k =
         )
         |> andThen
             (\hash ->
-                derive {- "input" -} hash <| \target prefix buildPath ->
+                derive {- "input" -} hash <| \{ prefix, buildPath } target ->
                 execLog prefix "cp" [ Path.toString inputPath, hashToPath buildPath target ]
             )
         |> andThen k
@@ -185,7 +190,8 @@ inputs inputPaths =
             case inputHash line of
                 Ok hash ->
                     ( inputPath
-                    , derive {- "inputs" -} hash <| \target prefix buildPath -> execLog prefix "cp" [ Path.toString inputPath, hashToPath buildPath target ]
+                    , derive {- "inputs" -} hash <| \{ prefix, buildPath } target ->
+                    execLog prefix "cp" [ Path.toString inputPath, hashToPath buildPath target ]
                     )
                         |> Ok
 
@@ -202,18 +208,17 @@ derive :
     -- String ->
     FileOrDirectory
     ->
-        (FileOrDirectory
-         -> List String
-         -> Path
+        (Input
+         -> FileOrDirectory
          -> BackendTask FatalError ()
         )
     -> Monad FileOrDirectory
 derive {- description -} target inner =
     Monad
-        (\deps existing prefix buildPath ->
+        (\({ existing, buildPath } as input_) deps ->
             -- Do.do
             --     (appendLog
-            --         (hashToPath buildPath  target
+            --         (hashToPath path   target
             --             ++ ": "
             --             ++ description
             --             ++ " from "
@@ -236,7 +241,7 @@ derive {- description -} target inner =
                 in
                 Do.exec "rm" [ "-rf", hashToPath buildPath tmp ] <| \_ ->
                 Do.do
-                    (inner tmp prefix buildPath
+                    (inner input_ tmp
                         |> BackendTask.onError
                             (\e ->
                                 Do.exec "rm" [ "-rf", hashToPath buildPath tmp ] <| \_ ->
@@ -278,8 +283,8 @@ combine files =
                     )
                 |> combineHashes
     in
-    derive {- "combine" -} outputHash <| \target prefix buildPath ->
-    Do.do Env.parallelism <| \parallelism ->
+    jobs <| \parallelism ->
+    derive {- "combine" -} outputHash <| \{ prefix, buildPath } target ->
     let
         withOutput : List ( { hash : FileOrDirectory, filename : Path }, String )
         withOutput =
@@ -328,7 +333,7 @@ pipeThrough cmd args hash k =
         outputHash =
             extendHashWith (cmd :: args) hash
     in
-    (derive {- (String.join " " ("pipeThrough" :: cmd :: args)) -} outputHash <| \target prefix buildPath ->
+    (derive {- (String.join " " ("pipeThrough" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
     BackendTask.Extra.timed
         (String.join " " (prefix ++ "Piping" :: hashToPath buildPath hash :: "through" :: cmd :: args))
         (String.join " " (prefix ++ "Piped " :: hashToPath buildPath hash :: "through" :: cmd :: args))
@@ -353,7 +358,7 @@ commandInFolder cmd args hash k =
         outputHash =
             extendHashWith (cmd :: args) hash
     in
-    (derive {- (String.join " " ("commandInFolder" :: cmd :: args)) -} outputHash <| \target prefix buildPath ->
+    (derive {- (String.join " " ("commandInFolder" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
     Do.do (commandLog prefix cmd args |> BackendTask.inDir (hashToPath buildPath hash)) <| \output ->
     BackendTask.allowFatal (Script.writeFile { path = hashToPath buildPath target, body = output })
     )
@@ -377,7 +382,7 @@ commandWithFile cmd args hash k =
         outputHash =
             extendHashWith (cmd :: args) hash
     in
-    (derive {- (String.join " " ("commandWithFile" :: cmd :: args)) -} outputHash <| \target prefix buildPath ->
+    (derive {- (String.join " " ("commandWithFile" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
     Do.do (commandLog prefix cmd (args ++ [ hashToPath buildPath hash ])) <| \output ->
     BackendTask.allowFatal (Script.writeFile { path = hashToPath buildPath target, body = output })
     )
@@ -425,13 +430,13 @@ do x f =
 withFile : FileOrDirectory -> (String -> Monad a) -> (a -> Monad b) -> Monad b
 withFile hash f k =
     Monad
-        (\existing deps prefix buildPath ->
+        (\({ buildPath } as input_) deps ->
             Do.allowFatal (File.rawFile (hashToPath buildPath hash)) <| \raw ->
             let
                 (Monad m) =
                     f raw
             in
-            m existing (hashSetInsert hash deps) prefix buildPath
+            m input_ (hashSetInsert hash deps)
         )
         |> andThen k
 
@@ -444,17 +449,26 @@ writeFile content k =
         hash =
             stringToHash content
     in
-    (derive {- "writeFile" -} hash <| \target _ buildPath ->
+    (derive {- "writeFile" -} hash <| \{ buildPath } target ->
     BackendTask.allowFatal (Script.writeFile { path = hashToPath buildPath target, body = content })
     )
         |> andThen k
 
 
 {-| -}
-run : Path -> Monad FileOrDirectory -> BackendTask FatalError { output : Path, dependencies : List Path }
-run buildPath (Monad m) =
+run : { jobs : Maybe Int } -> Path -> Monad FileOrDirectory -> BackendTask FatalError { output : Path, dependencies : List Path }
+run config buildPath (Monad m) =
     Do.do (listExisting buildPath) <| \existing ->
-    m hashSetEmpty existing [] buildPath
+    let
+        input_ : Input
+        input_ =
+            { existing = existing
+            , prefix = []
+            , buildPath = buildPath
+            , jobs = config.jobs
+            }
+    in
+    m input_ hashSetEmpty
         |> BackendTask.map
             (\( output, deps ) ->
                 { output = Path.path (hashToPath buildPath output)
@@ -482,10 +496,10 @@ listExisting path =
 combineBy : Int -> List (Monad a) -> Monad (List a)
 combineBy n ops =
     Monad
-        (\deps existing prefix buildPath ->
+        (\input_ deps ->
             ops
                 |> List.indexedMap
-                    (\i (Monad m) -> BackendTask.map (Tuple.pair i) (m deps existing prefix buildPath))
+                    (\i (Monad m) -> BackendTask.map (Tuple.pair i) (m input_ deps))
                 |> BackendTask.Extra.combineBy n
                 |> BackendTask.map
                     (\res ->
@@ -508,10 +522,9 @@ each l f k =
 sequence : List (Monad a) -> Monad (List a)
 sequence ops =
     Monad
-        (\deps existing prefix buildPath ->
+        (\input_ deps ->
             ops
-                |> List.map
-                    (\(Monad m) -> m deps existing prefix buildPath)
+                |> List.map (\(Monad m) -> m input_ deps)
                 |> BackendTask.sequence
                 |> BackendTask.map
                     (\res ->
@@ -525,33 +538,42 @@ sequence ops =
 {-| -}
 timed : String -> String -> Monad a -> Monad a
 timed before after (Monad task) =
-    Monad (\deps existing prefix buildPath -> BackendTask.Extra.timed before after (task deps existing prefix buildPath))
+    Monad (\input_ deps -> BackendTask.Extra.timed before after (task input_ deps))
 
 
 {-| -}
 withPrefix : String -> Monad a -> Monad a
 withPrefix newPrefix (Monad m) =
-    Monad (\deps existing prefix buildPath -> m deps existing (newPrefix :: prefix) buildPath)
+    Monad (\input_ deps -> m { input_ | prefix = newPrefix :: input_.prefix } deps)
 
 
-cpuCount : (Int -> Monad a) -> Monad a
-cpuCount k =
+jobs : (Int -> Monad a) -> Monad a
+jobs k =
+    andThen k jobs_
+
+
+jobs_ : Monad Int
+jobs_ =
     Monad
-        (\deps _ _ _ ->
-            Do.command "nproc" [ "--all" ] <| \raw ->
-            let
-                trimmed : String
-                trimmed =
-                    String.trim raw
-            in
-            case String.toInt trimmed of
-                Nothing ->
-                    BackendTask.fail (FatalError.fromString ("Could not parse nproc output: " ++ Json.Encode.encode 0 (Json.Encode.string trimmed)))
+        (\input_ deps ->
+            case input_.jobs of
+                Just j ->
+                    BackendTask.succeed ( j, deps )
 
-                Just n ->
-                    BackendTask.succeed ( n, deps )
+                Nothing ->
+                    Do.command "nproc" [ "--all" ] <| \raw ->
+                    let
+                        trimmed : String
+                        trimmed =
+                            String.trim raw
+                    in
+                    case String.toInt trimmed of
+                        Nothing ->
+                            BackendTask.fail (FatalError.fromString ("Invalid nproc output: " ++ Json.Encode.encode 0 (Json.Encode.string trimmed)))
+
+                        Just n ->
+                            BackendTask.succeed ( n, deps )
         )
-        |> andThen k
 
 
 

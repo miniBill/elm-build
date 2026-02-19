@@ -26,6 +26,7 @@ type alias Config inputs =
     , buildDirectory : Path
     , outputName : Path
     , removeStale : Bool
+    , jobs : Maybe Int
     }
 
 
@@ -58,6 +59,19 @@ programConfig =
                     (Option.flag "remove-stale"
                         |> Option.withDescription "Remove unused files from the build folder"
                     )
+                |> OptionsParser.with
+                    (Option.optionalKeywordArg "jobs"
+                        |> Option.withDescription "Number of parallel jobs to run"
+                        |> Option.validateMapIfPresent
+                            (\j ->
+                                case String.toInt j of
+                                    Nothing ->
+                                        Err ("Invalid number of jobs: " ++ j)
+
+                                    Just i ->
+                                        Ok i
+                            )
+                    )
             )
 
 
@@ -68,7 +82,7 @@ task config =
         Do.do config.getInputs <| \inputs ->
         Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Processing inputs") <| \_ ->
         Do.exec "mkdir" [ "-p", Path.toString config.buildDirectory ] <| \_ ->
-        Do.do (Cache.run config.buildDirectory (config.buildAction inputs)) <| \combined ->
+        Do.do (Cache.run { jobs = config.jobs } config.buildDirectory (config.buildAction inputs)) <| \combined ->
         Do.exec "rm" [ "-f", Path.toString config.outputName ] <| \_ ->
         symlink_
             { source = config.outputName
