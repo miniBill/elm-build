@@ -89,17 +89,26 @@ succeed v =
     Monad "succeed" (\_ deps -> BackendTask.succeed ( v, deps ))
 
 
+debug : Bool
+debug =
+    False
+
+
 runMonad : Monad a -> Input -> HashSet -> BackendTask FatalError ( a, HashSet )
 runMonad (Monad label m) input_ deps =
-    m input_ deps
-        |> BackendTask.andThen
-            (\( v, newDeps ) ->
-                if hashSetToList (hashSetUnion deps newDeps) == hashSetToList newDeps then
-                    BackendTask.succeed ( v, newDeps )
+    if debug then
+        m input_ deps
+            |> BackendTask.andThen
+                (\( v, newDeps ) ->
+                    if hashSetToList (hashSetUnion deps newDeps) == hashSetToList newDeps then
+                        BackendTask.succeed ( v, newDeps )
 
-                else
-                    BackendTask.fail (FatalError.fromString ("Missed dependency inside " ++ label))
-            )
+                    else
+                        BackendTask.fail (FatalError.fromString ("Missed dependency inside " ++ label))
+                )
+
+    else
+        m input_ deps
 
 
 {-| -}
