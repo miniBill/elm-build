@@ -56,7 +56,6 @@ import BackendTask.File as File
 import BackendTask.Stream as Stream
 import FNV1a
 import FastDict as Dict exposing (Dict)
-import FastSet as Set exposing (Set)
 import FatalError exposing (FatalError)
 import Hex
 import Json.Decode
@@ -606,7 +605,7 @@ combineBy n ops =
                 [] ->
                     BackendTask.succeed ( [], deps )
 
-                _ ->
+                _ :: _ ->
                     ops
                         |> List.indexedMap
                             (\i m -> BackendTask.map (Tuple.pair i) (runMonad m input_ deps))
