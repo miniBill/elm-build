@@ -91,8 +91,36 @@ combineBy_ n list =
 
 combineIgnore : List (BackendTask error a) -> BackendTask error ()
 combineIgnore inputs =
-    List.foldr (\e acc -> BackendTask.map2 always e acc) (BackendTask.succeed ()) inputs
-        |> BackendTask.map (\_ -> ())
+    let
+        arr : Array (BackendTask error a)
+        arr =
+            Array.fromList inputs
+
+        go : Int -> Int -> BackendTask error ()
+        go fromIncluded toExcluded =
+            let
+                sliceSize : Int
+                sliceSize =
+                    toExcluded - fromIncluded
+            in
+            if sliceSize > 128 then
+                let
+                    mid : Int
+                    mid =
+                        fromIncluded + sliceSize // 2
+                in
+                BackendTask.map2 (\_ _ -> ())
+                    (go fromIncluded mid)
+                    (go mid toExcluded)
+
+            else
+                arr
+                    |> Array.slice fromIncluded toExcluded
+                    |> Array.toList
+                    |> BackendTask.combine
+                    |> BackendTask.map (\_ -> ())
+    in
+    go 0 (Array.length arr)
 
 
 combine : List (BackendTask error a) -> BackendTask error (List a)
@@ -105,11 +133,11 @@ combine inputs =
         go : Int -> Int -> BackendTask error (Rope a)
         go fromIncluded toExcluded =
             let
-                sliceSize : number
+                sliceSize : Int
                 sliceSize =
                     toExcluded - fromIncluded
             in
-            if sliceSize > 16 then
+            if sliceSize > 128 then
                 let
                     mid : Int
                     mid =
@@ -140,11 +168,11 @@ sequence inputs =
         go : Int -> Int -> BackendTask error (Rope a)
         go fromIncluded toExcluded =
             let
-                sliceSize : number
+                sliceSize : Int
                 sliceSize =
                     toExcluded - fromIncluded
             in
-            if sliceSize > 16 then
+            if sliceSize > 128 then
                 let
                     mid : Int
                     mid =
@@ -168,7 +196,7 @@ sequence inputs =
         |> BackendTask.map Rope.toList
 
 
-sequence_ : List (BackendTask error ()) -> BackendTask a ()
+sequence_ : List (BackendTask error ()) -> BackendTask error ()
 sequence_ inputs =
     let
         arr : Array (BackendTask error ())
@@ -182,7 +210,7 @@ sequence_ inputs =
                 sliceSize =
                     toExcluded - fromIncluded
             in
-            if sliceSize > 16 then
+            if sliceSize > 128 then
                 let
                     mid : Int
                     mid =
