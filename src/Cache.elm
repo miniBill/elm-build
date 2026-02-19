@@ -286,7 +286,7 @@ combine files =
     jobs <| \parallelism ->
     derive {- "combine" -} outputHash <| \{ prefix, buildPath } target ->
     let
-        withOutput : List ( { hash : FileOrDirectory, filename : Path }, String )
+        withOutput : List ( FileOrDirectory, String )
         withOutput =
             files
                 |> List.map
@@ -298,7 +298,7 @@ combine files =
                                     ++ "/"
                                     ++ Path.toString file.filename
                         in
-                        ( file, outputFilename )
+                        ( file.hash, outputFilename )
                     )
 
         dirs : List String
@@ -321,7 +321,7 @@ combine files =
         )
     <| \_ ->
     withOutput
-        |> List.map (\( file, outputFilename ) -> execLog prefix "cp" [ "-rl", hashToPath buildPath file.hash, outputFilename ])
+        |> List.map (\( hash, outputFilename ) -> execLog prefix "cp" [ "-rl", hashToPath buildPath hash, outputFilename ])
         |> BackendTask.Extra.combineBy_ parallelism
 
 
