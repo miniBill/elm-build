@@ -302,6 +302,9 @@ buildTree files =
         addFile_ : List String -> String -> FileOrDirectory -> Tree -> Tree
         addFile_ dir filename hash (Tree tree) =
             case dir of
+                "" :: tail ->
+                    addFile_ tail filename hash (Tree tree)
+
                 [] ->
                     Tree
                         { files = Dict.insert filename hash tree.files
