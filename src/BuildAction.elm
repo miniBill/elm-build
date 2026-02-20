@@ -248,7 +248,7 @@ imagesElmFile processedFiles =
         |> (::) standardFormats.declaration
         |> (::) getSizes_.declaration
         |> (::) toSources.declaration
-        |> (::) toPicture.declaration
+        |> (::) (toPicture.declaration |> Elm.expose)
         |> Elm.file [ "Images" ]
 
 
