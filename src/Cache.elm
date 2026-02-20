@@ -3,7 +3,7 @@ module Cache exposing
     , Monad, do, succeed, fail
     , writeFile, run
     , map, map2, andThen, combine, combineBy, each, sequence
-    , pipeThrough, commandWithFile, commandInReadonlyDirectory, commandInWritableDirectory, withFile
+    , pipeThrough, commandWithFile, commandInReadonlyDirectory, commandInWritableDirectory, compute, withFile
     , withPrefix, timed
     , jobs, triggerDebugger
     )
@@ -33,7 +33,7 @@ module Cache exposing
 
 ## Operations
 
-@docs pipeThrough, commandWithFile, commandInReadonlyDirectory, commandInWritableDirectory, withFile
+@docs pipeThrough, commandWithFile, commandInReadonlyDirectory, commandInWritableDirectory, compute, withFile
 
 
 ## Output control
@@ -493,6 +493,31 @@ commandWithFile cmd args hash k =
     (derive {- (String.join " " ("commandWithFile" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
     Do.do (commandLog prefix cmd (args ++ [ hashToPath buildPath hash ])) <| \output ->
     BackendTask.allowFatal (Script.writeFile { path = hashToPath buildPath target, body = output })
+    )
+        |> andThen k
+
+
+{-| Cache a pure Elm computation. This is the internal analog to the
+command-based primitives (`pipeThrough`, `commandWithFile`, etc.) — instead
+of piping through an external process, the result is computed in pure Elm.
+
+The output hash is derived from the label strings and the input dependency hash.
+If the output already exists in the cache, the computation is skipped entirely.
+
+This is the key primitive for caching pure functions: if the inputs haven't
+changed, the output is guaranteed to be the same (by Elm's purity), so we
+can safely return the cached result.
+
+-}
+compute : List String -> FileOrDirectory -> (() -> String) -> (FileOrDirectory -> Monad a) -> Monad a
+compute label depsHash fn k =
+    let
+        outputHash : FileOrDirectory
+        outputHash =
+            extendHashWith label depsHash
+    in
+    (derive outputHash <| \{ buildPath } target ->
+        BackendTask.allowFatal (Script.writeFile { path = hashToPath buildPath target, body = fn () })
     )
         |> andThen k
 
