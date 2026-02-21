@@ -2,11 +2,10 @@ module Cache exposing
     ( FileOrDirectory, input, inputs
     , Monad, do, succeed, fail
     , writeFile, run
-    , map, map2, andThen, combine, combineBy, each, sequence
+    , map, map2, map3, map4, andThen, combine, combineBy, each, sequence
     , pipeThrough, commandWithFile, commandInReadonlyDirectory, commandInWritableDirectory, withFile
     , withPrefix, timed
     , jobs, triggerDebugger
-    , map3
     )
 
 {-|
@@ -29,7 +28,7 @@ module Cache exposing
 
 ## Transforming and combining `Monad` values
 
-@docs map, map2, andThen, combine, combineBy, each, sequence
+@docs map, map2, map3, map4, andThen, combine, combineBy, each, sequence
 
 
 ## Operations
@@ -126,40 +125,67 @@ map f m =
 
 
 {-| -}
-map2 : (a -> b -> c) -> ((a -> Monad a) -> Monad a) -> ((b -> Monad b) -> Monad b) -> (c -> Monad d) -> Monad d
-map2 f a b k =
+map2 :
+    (a -> b -> c)
+    -> Monad a
+    -> Monad b
+    -> Monad c
+map2 f a b =
     Monad "map2"
         (\input_ deps ->
             BackendTask.map2
                 (\( va, depsA ) ( vb, depsB ) ->
                     ( f va vb, hashSetUnion depsA depsB )
                 )
-                (runMonad (a succeed) input_ deps)
-                (runMonad (b succeed) input_ deps)
+                (runMonad a input_ deps)
+                (runMonad b input_ deps)
         )
-        |> andThen k
 
 
 {-| -}
 map3 :
     (a -> b -> c -> d)
-    -> ((a -> Monad a) -> Monad a)
-    -> ((b -> Monad b) -> Monad b)
-    -> ((c -> Monad c) -> Monad c)
-    -> (d -> Monad e)
-    -> Monad e
-map3 f a b c k =
+    -> Monad a
+    -> Monad b
+    -> Monad c
+    -> Monad d
+map3 f a b c =
     Monad "map3"
         (\input_ deps ->
             BackendTask.map3
                 (\( va, depsA ) ( vb, depsB ) ( vc, depsC ) ->
                     ( f va vb vc, hashSetUnion depsA depsB |> hashSetUnion depsC )
                 )
-                (runMonad (a succeed) input_ deps)
-                (runMonad (b succeed) input_ deps)
-                (runMonad (c succeed) input_ deps)
+                (runMonad a input_ deps)
+                (runMonad b input_ deps)
+                (runMonad c input_ deps)
         )
-        |> andThen k
+
+
+{-| -}
+map4 :
+    (a -> b -> c -> d -> e)
+    -> Monad a
+    -> Monad b
+    -> Monad c
+    -> Monad d
+    -> Monad e
+map4 f a b c d =
+    Monad "map4"
+        (\input_ deps ->
+            BackendTask.map4
+                (\( va, depsA ) ( vb, depsB ) ( vc, depsC ) ( vd, depsD ) ->
+                    ( f va vb vc vd
+                    , hashSetUnion
+                        (hashSetUnion depsA depsB)
+                        (hashSetUnion depsC depsD)
+                    )
+                )
+                (runMonad a input_ deps)
+                (runMonad b input_ deps)
+                (runMonad c input_ deps)
+                (runMonad d input_ deps)
+        )
 
 
 {-| -}
@@ -178,19 +204,18 @@ andThen f m =
 {-| -}
 fail : String -> Monad a
 fail msg =
-    triggerDebugger <| \_ ->
+    do triggerDebugger <| \_ ->
     Monad "fail" (\_ _ -> BackendTask.fail (FatalError.fromString msg))
 
 
 {-| -}
-triggerDebugger : (() -> Monad a) -> Monad a
-triggerDebugger k =
+triggerDebugger : Monad ()
+triggerDebugger =
     Monad "triggerDebugger"
         (\_ deps ->
             BackendTask.Custom.run "triggerDebugger" Json.Encode.null (Json.Decode.succeed ( (), deps ))
                 |> BackendTask.allowFatal
         )
-        |> andThen k
 
 
 {-| -}
@@ -378,7 +403,7 @@ buildTree files =
 
 combineTree : Tree -> Monad FileOrDirectory
 combineTree (Tree tree) =
-    jobs <| \parallelism ->
+    do jobs <| \parallelism ->
     do
         (tree.directories
             |> Dict.foldl (\filename subtree acc -> map (Tuple.pair filename) (combineTree subtree) :: acc) []
@@ -408,14 +433,14 @@ combineTree (Tree tree) =
 
 
 {-| -}
-pipeThrough : String -> List String -> FileOrDirectory -> (FileOrDirectory -> Monad a) -> Monad a
-pipeThrough cmd args hash k =
+pipeThrough : String -> List String -> FileOrDirectory -> Monad FileOrDirectory
+pipeThrough cmd args hash =
     let
         outputHash : FileOrDirectory
         outputHash =
             extendHashWith (cmd :: args) hash
     in
-    (derive {- (String.join " " ("pipeThrough" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
+    derive {- (String.join " " ("pipeThrough" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
     BackendTask.Extra.timed
         (String.join " " (prefix ++ "Piping" :: hashToPath buildPath hash :: "through" :: cmd :: args))
         (String.join " " (prefix ++ "Piped " :: hashToPath buildPath hash :: "through" :: cmd :: args))
@@ -424,8 +449,6 @@ pipeThrough cmd args hash k =
             |> Stream.pipe (Stream.fileWrite (hashToPath buildPath target))
             |> Stream.run
         )
-    )
-        |> andThen k
 
 
 {-| Run a command in a specific generated directory and save the result to a file.
@@ -440,18 +463,16 @@ implementation detail that many tools need to write intermediate files.
 otherwise elm-build has no way to know when to re-run it.
 
 -}
-commandInReadonlyDirectory : String -> List String -> FileOrDirectory -> (FileOrDirectory -> Monad a) -> Monad a
-commandInReadonlyDirectory cmd args hash k =
+commandInReadonlyDirectory : String -> List String -> FileOrDirectory -> Monad FileOrDirectory
+commandInReadonlyDirectory cmd args hash =
     let
         outputHash : FileOrDirectory
         outputHash =
             extendHashWith (cmd :: args) hash
     in
-    (derive {- (String.join " " ("commandInReadonlyDirectory" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
+    derive {- (String.join " " ("commandInReadonlyDirectory" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
     Do.do (commandLog prefix cmd args |> BackendTask.inDir (hashToPath buildPath hash)) <| \output ->
     BackendTask.allowFatal (Script.writeFile { path = hashToPath buildPath target, body = output })
-    )
-        |> andThen k
 
 
 {-| Run a command in a writable temporary directory seeded from a cached directory.
@@ -469,14 +490,14 @@ implementation detail that many tools need to write intermediate files.
 otherwise elm-build has no way to know when to re-run it.
 
 -}
-commandInWritableDirectory : String -> List String -> FileOrDirectory -> (FileOrDirectory -> Monad a) -> Monad a
-commandInWritableDirectory cmd args hash k =
+commandInWritableDirectory : String -> List String -> FileOrDirectory -> Monad FileOrDirectory
+commandInWritableDirectory cmd args hash =
     let
         outputHash : FileOrDirectory
         outputHash =
             extendHashWith (cmd :: args) hash
     in
-    (derive outputHash <| \{ prefix, buildPath } target ->
+    derive outputHash <| \{ prefix, buildPath } target ->
     let
         workspacePath : String
         workspacePath =
@@ -493,8 +514,6 @@ commandInWritableDirectory cmd args hash k =
         )
     <| \output ->
     BackendTask.allowFatal (Script.writeFile { path = hashToPath buildPath target, body = output })
-    )
-        |> andThen k
 
 
 {-| Run a command passing in a file (or directory) as last argument and save the result to a file.
@@ -506,19 +525,16 @@ commandWithFile :
     String
     -> List String
     -> FileOrDirectory
-    -> (FileOrDirectory -> Monad a)
-    -> Monad a
-commandWithFile cmd args hash k =
+    -> Monad FileOrDirectory
+commandWithFile cmd args hash =
     let
         outputHash : FileOrDirectory
         outputHash =
             extendHashWith (cmd :: args) hash
     in
-    (derive {- (String.join " " ("commandWithFile" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
+    derive {- (String.join " " ("commandWithFile" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
     Do.do (commandLog prefix cmd (args ++ [ hashToPath buildPath hash ])) <| \output ->
     BackendTask.allowFatal (Script.writeFile { path = hashToPath buildPath target, body = output })
-    )
-        |> andThen k
 
 
 {-| -}
@@ -559,28 +575,25 @@ do x f =
 
 
 {-| -}
-withFile : FileOrDirectory -> (String -> Monad a) -> (a -> Monad b) -> Monad b
-withFile hash f k =
+withFile : FileOrDirectory -> (String -> Monad a) -> Monad a
+withFile hash f =
     Monad "withFile"
         (\({ buildPath } as input_) deps ->
             Do.allowFatal (File.rawFile (hashToPath buildPath hash)) <| \raw ->
             runMonad (f raw) input_ (hashSetInsert hash deps)
         )
-        |> andThen k
 
 
 {-| -}
-writeFile : String -> (FileOrDirectory -> Monad a) -> Monad a
-writeFile content k =
+writeFile : String -> Monad FileOrDirectory
+writeFile content =
     let
         hash : FileOrDirectory
         hash =
             stringToHash content
     in
-    (derive {- "writeFile" -} hash <| \{ buildPath } target ->
+    derive {- "writeFile" -} hash <| \{ buildPath } target ->
     BackendTask.allowFatal (Script.writeFile { path = hashToPath buildPath target, body = content })
-    )
-        |> andThen k
 
 
 {-| -}
@@ -648,9 +661,9 @@ combineBy n ops =
 
 
 {-| -}
-each : List a -> (a -> Monad b) -> (List b -> Monad c) -> Monad c
-each l f k =
-    l |> List.map f |> sequence |> andThen k
+each : List a -> (a -> Monad b) -> Monad (List b)
+each l f =
+    l |> List.map f |> sequence
 
 
 {-| -}
@@ -686,13 +699,8 @@ withPrefix newPrefix m =
     Monad "withPrefix" (\input_ deps -> runMonad m { input_ | prefix = newPrefix :: input_.prefix } deps)
 
 
-jobs : (Int -> Monad a) -> Monad a
-jobs k =
-    andThen k jobs_
-
-
-jobs_ : Monad Int
-jobs_ =
+jobs : Monad Int
+jobs =
     let
         tryRunningOrElse :
             String
