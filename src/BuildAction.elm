@@ -28,6 +28,7 @@ import Path exposing (Path)
 import Result.Extra
 import String.Extra
 import String.Multiline
+import Triple.Extra
 
 
 type ProcessedFile
@@ -139,30 +140,34 @@ buildAction config inputs =
         inputSize : Int
         inputSize =
             List.length inputs
-
-        processFilesTask : Int -> (List ProcessedFile -> Cache.Monad a) -> Cache.Monad a
-        processFilesTask parallelism k =
-            Cache.do
-                (inputs
-                    |> List.indexedMap (processFile config inputSize)
-                    |> Cache.combineBy parallelism
-                )
-            <| \v ->
-            k (Maybe.Extra.values v)
     in
-    Cache.jobs <| \parallelism ->
-    processFilesTask parallelism <| \processedFiles ->
-    elmCodegen (imagesElmFile processedFiles) <| \imagesElm ->
-    elmCodegen (fontsElmFile processedFiles) <| \fontsElm ->
-    fontsCssFile processedFiles <| \fontsCss ->
     Cache.do
-        (processedFiles
-            |> List.concatMap processedFileToFileList
-            |> (::) fontsCss
-            |> Cache.combine
-            |> Cache.withPrefix ("[" ++ String.fromInt inputSize ++ "/" ++ String.fromInt inputSize ++ "]")
+        (Cache.jobs <| \parallelism ->
+        inputs
+            |> List.indexedMap (processFile config inputSize)
+            |> Cache.combineBy parallelism
         )
-    <| \public ->
+    <| \v ->
+    let
+        processedFiles : List ProcessedFile
+        processedFiles =
+            Maybe.Extra.values v
+    in
+    Cache.map3 Triple.Extra.triple
+        (elmCodegen (imagesElmFile processedFiles))
+        (elmCodegen (fontsElmFile processedFiles))
+        (\k ->
+            fontsCssFile processedFiles <| \fontsCss ->
+            Cache.do
+                (processedFiles
+                    |> List.concatMap processedFileToFileList
+                    |> (::) fontsCss
+                    |> Cache.combine
+                    |> Cache.withPrefix ("[" ++ String.fromInt inputSize ++ "/" ++ String.fromInt inputSize ++ "]")
+                )
+                k
+        )
+    <| \( imagesElm, fontsElm, public ) ->
     Cache.combine
         [ imagesElm
         , fontsElm

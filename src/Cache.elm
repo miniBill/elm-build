@@ -6,6 +6,7 @@ module Cache exposing
     , pipeThrough, commandWithFile, commandInReadonlyDirectory, commandInWritableDirectory, withFile
     , withPrefix, timed
     , jobs, triggerDebugger
+    , map3
     )
 
 {-|
@@ -125,17 +126,40 @@ map f m =
 
 
 {-| -}
-map2 : (a -> b -> c) -> Monad a -> Monad b -> Monad c
-map2 f a b =
+map2 : (a -> b -> c) -> ((a -> Monad a) -> Monad a) -> ((b -> Monad b) -> Monad b) -> (c -> Monad d) -> Monad d
+map2 f a b k =
     Monad "map2"
         (\input_ deps ->
             BackendTask.map2
                 (\( va, depsA ) ( vb, depsB ) ->
                     ( f va vb, hashSetUnion depsA depsB )
                 )
-                (runMonad a input_ deps)
-                (runMonad b input_ deps)
+                (runMonad (a succeed) input_ deps)
+                (runMonad (b succeed) input_ deps)
         )
+        |> andThen k
+
+
+{-| -}
+map3 :
+    (a -> b -> c -> d)
+    -> ((a -> Monad a) -> Monad a)
+    -> ((b -> Monad b) -> Monad b)
+    -> ((c -> Monad c) -> Monad c)
+    -> (d -> Monad e)
+    -> Monad e
+map3 f a b c k =
+    Monad "map3"
+        (\input_ deps ->
+            BackendTask.map3
+                (\( va, depsA ) ( vb, depsB ) ( vc, depsC ) ->
+                    ( f va vb vc, hashSetUnion depsA depsB |> hashSetUnion depsC )
+                )
+                (runMonad (a succeed) input_ deps)
+                (runMonad (b succeed) input_ deps)
+                (runMonad (c succeed) input_ deps)
+        )
+        |> andThen k
 
 
 {-| -}
