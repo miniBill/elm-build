@@ -4,6 +4,7 @@ import Ansi.Color
 import BackendTask exposing (BackendTask)
 import BackendTask.Do as Do
 import BackendTask.Extra
+import BackendTask.Time
 import BuildAction
 import Cache
 import Cli.Option as Option
@@ -13,6 +14,7 @@ import FatalError exposing (FatalError)
 import Pages.Script as Script exposing (Script)
 import Path exposing (Path)
 import Set exposing (Set)
+import Time
 
 
 run : Script
@@ -78,6 +80,7 @@ programConfig =
 task : Config inputs -> BackendTask FatalError ()
 task config =
     BackendTask.Extra.profiling "main" <|
+        Do.do BackendTask.Time.now <| \begin ->
         Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Getting inputs") <| \_ ->
         Do.do config.getInputs <| \inputs ->
         Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Processing inputs") <| \_ ->
@@ -121,10 +124,37 @@ task config =
                     |> BackendTask.Extra.sequence_
                 )
             <| \_ ->
-            Script.log "Build done"
+            Do.do BackendTask.Time.now <| \end ->
+            let
+                elapsed : Int
+                elapsed =
+                    Time.posixToMillis end - Time.posixToMillis begin
+            in
+            Script.log ("Build done in " ++ timeToString elapsed)
 
         else
             Script.log (String.fromInt (Set.size unexpected) ++ " stale files in the build directory")
+
+
+timeToString : Int -> String
+timeToString ms =
+    let
+        s : Int
+        s =
+            ms // 1000
+
+        m : Int
+        m =
+            s // 60
+    in
+    if m > 0 then
+        String.fromInt m ++ "m " ++ String.fromInt (modBy 60 s) ++ "s " ++ String.fromInt (modBy 1000 ms) ++ "ms"
+
+    else if s > 0 then
+        String.fromFloat (toFloat ms / 1000) ++ "s"
+
+    else
+        String.fromInt ms ++ "ms"
 
 
 symlink_ : { source : Path, target : Path } -> (() -> BackendTask FatalError a) -> BackendTask FatalError a
