@@ -270,7 +270,7 @@ encodeProcessedFiles processedFiles =
                     (\{ filename, hash } ->
                         -- CORRECTNESS: if svg, width or height change then hash
                         -- will change too so we don't need to track them separately
-                        ( hash, Path.toString filename )
+                        ( hash, Path.toString filename ++ "." )
                     )
                 |> List.unzip
     in

@@ -156,7 +156,7 @@ inputs inputPaths =
             case Internal.inputHash line of
                 Ok hash ->
                     ( inputPath
-                    , Internal.derive {- "inputs" -} hash <| \{ prefix, buildPath } target ->
+                    , Internal.derive "inputs" hash <| \{ prefix, buildPath } target ->
                     Internal.execLog prefix "cp" [ Path.toString inputPath, Internal.hashToPath buildPath target ]
                     )
                         |> Ok
@@ -261,7 +261,7 @@ combineTree (Tree tree) =
                 |> String.join "|"
                 |> Internal.stringToHash
     in
-    Internal.derive {- "combine" -} outputHash <| \{ prefix, buildPath } target ->
+    Internal.derive "combine" outputHash <| \{ prefix, buildPath } target ->
     Do.do (Internal.execLog prefix "mkdir" [ "-p", Internal.hashToPath buildPath target ]) <| \_ ->
     combined
         |> Dict.foldl (\outputFilename hash acc -> Internal.execLog prefix "cp" [ "-rl", Internal.hashToPath buildPath hash, Internal.hashToPath buildPath target ++ "/" ++ outputFilename ] :: acc) []
@@ -288,7 +288,7 @@ writeFile content =
         hash =
             Internal.stringToHash content
     in
-    Internal.derive {- "writeFile" -} hash <| \{ buildPath } target ->
+    Internal.derive "writeFile" hash <| \{ buildPath } target ->
     BackendTask.allowFatal (Script.writeFile { path = Internal.hashToPath buildPath target, body = content })
 
 

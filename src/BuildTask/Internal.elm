@@ -34,15 +34,15 @@ type alias Input =
 
 
 derive :
-    -- String ->
-    Hash
+    String
+    -> Hash
     ->
         (Input
          -> Hash
          -> BackendTask FatalError ()
         )
     -> BuildTask Hash
-derive {- description -} target inner =
+derive description target inner =
     BuildTask "derive"
         (\({ existing, buildPath } as input_) deps ->
             let
@@ -73,25 +73,53 @@ derive {- description -} target inner =
                 BackendTask.succeed ( target, newDeps )
 
             else
-                let
-                    tmp : Hash
-                    tmp =
-                        hashToTmp target
-                in
-                Do.exec "rm" [ "-rf", hashToPath buildPath tmp ] <| \_ ->
-                Do.do
-                    (inner input_ tmp
-                        |> BackendTask.onError
-                            (\e ->
-                                Do.exec "rm" [ "-rf", hashToPath buildPath tmp ] <| \_ ->
-                                BackendTask.fail e
-                            )
-                    )
-                <| \_ ->
-                Do.exec "mv" [ hashToPath buildPath tmp, hashToPath buildPath target ] <| \_ ->
-                Do.exec "chmod" [ "-R", "a=rX", hashToPath buildPath target ] <| \_ ->
-                BackendTask.succeed ( target, newDeps )
+                Do.do (fileExists (hashToPath buildPath target)) <| \exists ->
+                if exists then
+                    BackendTask.succeed ( target, newDeps )
+
+                else
+                    let
+                        tmp : Hash
+                        tmp =
+                            hashToTmp target
+                    in
+                    Do.exec "rm" [ "-rf", hashToPath buildPath tmp ] <| \_ ->
+                    Do.do
+                        (inner input_ tmp
+                            |> BackendTask.onError
+                                (\e ->
+                                    Do.exec "rm" [ "-rf", hashToPath buildPath tmp ] <| \_ ->
+                                    BackendTask.fail e
+                                )
+                        )
+                    <| \_ ->
+                    Do.do
+                        (Script.exec "mv" [ hashToPath buildPath tmp, hashToPath buildPath target ]
+                            |> BackendTask.onError
+                                (\e ->
+                                    Do.log ("Error inside " ++ description) <| \_ ->
+                                    BackendTask.fail e
+                                )
+                        )
+                    <| \_ ->
+                    Do.exec "chmod" [ "-R", "a=rX", hashToPath buildPath target ] <| \_ ->
+                    BackendTask.succeed ( target, newDeps )
         )
+
+
+fileExists : String -> BackendTask FatalError Bool
+fileExists path =
+    File.rawFile path
+        |> BackendTask.map (\_ -> True)
+        |> BackendTask.onError
+            (\e ->
+                case e.recoverable of
+                    File.FileDoesntExist ->
+                        BackendTask.succeed False
+
+                    _ ->
+                        BackendTask.fail e.fatal
+            )
 
 
 debug : Bool
@@ -397,7 +425,7 @@ input inputPath =
         )
         |> andThen
             (\hash ->
-                derive {- "input" -} hash <| \{ prefix, buildPath } target ->
+                derive "input" hash <| \{ prefix, buildPath } target ->
                 execLog prefix "cp" [ Path.toString inputPath, hashToPath buildPath target ]
             )
 

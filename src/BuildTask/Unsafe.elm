@@ -66,7 +66,7 @@ pipeThrough cmd args hash =
         outputHash =
             Internal.extendHashWith (cmd :: args) hash
     in
-    Internal.derive {- (String.join " " ("pipeThrough" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
+    Internal.derive (String.join " " ("pipeThrough" :: cmd :: args)) outputHash <| \{ prefix, buildPath } target ->
     BackendTask.Extra.timed
         (String.join " " (prefix ++ "Piping" :: Internal.hashToPath buildPath hash :: "through" :: cmd :: args))
         (String.join " " (prefix ++ "Piped " :: Internal.hashToPath buildPath hash :: "through" :: cmd :: args))
@@ -99,7 +99,7 @@ commandInReadonlyDirectory cmd args hash =
         outputHash =
             Internal.extendHashWith (cmd :: args) hash
     in
-    Internal.derive {- (String.join " " ("commandInReadonlyDirectory" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
+    Internal.derive (String.join " " ("commandInReadonlyDirectory" :: cmd :: args)) outputHash <| \{ prefix, buildPath } target ->
     Do.do (Internal.commandLog prefix cmd args |> BackendTask.inDir (Internal.hashToPath buildPath hash)) <| \output ->
     BackendTask.allowFatal (Script.writeFile { path = Internal.hashToPath buildPath target, body = output })
 
@@ -129,7 +129,7 @@ commandInWritableDirectory cmd args hash =
         outputHash =
             Internal.extendHashWith (cmd :: args) hash
     in
-    Internal.derive outputHash <| \{ prefix, buildPath } target ->
+    Internal.derive (String.join " " ("commandInWritableDirectory" :: cmd :: args)) outputHash <| \{ prefix, buildPath } target ->
     let
         workspacePath : String
         workspacePath =
@@ -172,6 +172,6 @@ commandWithFile cmd args hash =
         outputHash =
             Internal.extendHashWith (cmd :: args) hash
     in
-    Internal.derive {- (String.join " " ("commandWithFile" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
+    Internal.derive (String.join " " ("commandWithFile" :: cmd :: args)) outputHash <| \{ prefix, buildPath } target ->
     Do.do (Internal.commandLog prefix cmd (args ++ [ Internal.hashToPath buildPath hash ])) <| \output ->
     BackendTask.allowFatal (Script.writeFile { path = Internal.hashToPath buildPath target, body = output })
