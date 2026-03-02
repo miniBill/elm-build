@@ -1,4 +1,4 @@
-module Cache.Do exposing (..)
+module Cache.Do exposing (andThen, commandWithFile, each, jobs, map, map2, map3, map4, pipeThrough, withFile, writeFile)
 
 import Cache exposing (FileOrDirectory, Monad)
 

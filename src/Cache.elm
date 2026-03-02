@@ -47,17 +47,15 @@ module Cache exposing
 
 -}
 
-import Array exposing (Array)
 import BackendTask exposing (BackendTask)
 import BackendTask.Custom
 import BackendTask.Do as Do
 import BackendTask.Extra
 import BackendTask.File as File
 import BackendTask.Stream as Stream
-import FNV1a
+import Cache.Internal as Internal exposing (HashSet, Monad(..))
 import FastDict as Dict exposing (Dict)
 import FatalError exposing (FatalError)
-import Hex
 import Json.Decode
 import Json.Encode
 import Pages.Script as Script
@@ -66,13 +64,8 @@ import Result.Extra
 
 
 {-| -}
-type Monad a
-    = Monad
-        String
-        (Input
-         -> HashSet -- deps
-         -> BackendTask FatalError ( a, HashSet )
-        )
+type alias Monad a =
+    Internal.Monad a
 
 
 type alias Input =
@@ -81,6 +74,10 @@ type alias Input =
     , buildPath : Path
     , jobs : Maybe Int
     }
+
+
+type alias FileOrDirectory =
+    Internal.Hash
 
 
 {-| -}
@@ -100,7 +97,7 @@ runMonad (Monad label m) input_ deps =
         m input_ deps
             |> BackendTask.andThen
                 (\( v, newDeps ) ->
-                    if hashSetToList (hashSetUnion deps newDeps) == hashSetToList newDeps then
+                    if Internal.hashSetToList (Internal.hashSetUnion deps newDeps) == Internal.hashSetToList newDeps then
                         BackendTask.succeed ( v, newDeps )
 
                     else
@@ -135,7 +132,7 @@ map2 f a b =
         (\input_ deps ->
             BackendTask.map2
                 (\( va, depsA ) ( vb, depsB ) ->
-                    ( f va vb, hashSetUnion depsA depsB )
+                    ( f va vb, Internal.hashSetUnion depsA depsB )
                 )
                 (runMonad a input_ deps)
                 (runMonad b input_ deps)
@@ -154,7 +151,7 @@ map3 f a b c =
         (\input_ deps ->
             BackendTask.map3
                 (\( va, depsA ) ( vb, depsB ) ( vc, depsC ) ->
-                    ( f va vb vc, hashSetUnion depsA depsB |> hashSetUnion depsC )
+                    ( f va vb vc, Internal.hashSetUnion depsA depsB |> Internal.hashSetUnion depsC )
                 )
                 (runMonad a input_ deps)
                 (runMonad b input_ deps)
@@ -176,9 +173,9 @@ map4 f a b c d =
             BackendTask.map4
                 (\( va, depsA ) ( vb, depsB ) ( vc, depsC ) ( vd, depsD ) ->
                     ( f va vb vc vd
-                    , hashSetUnion
-                        (hashSetUnion depsA depsB)
-                        (hashSetUnion depsC depsD)
+                    , Internal.hashSetUnion
+                        (Internal.hashSetUnion depsA depsB)
+                        (Internal.hashSetUnion depsC depsD)
                     )
                 )
                 (runMonad a input_ deps)
@@ -224,7 +221,7 @@ input inputPath k =
     Monad "input"
         (\{ prefix } deps ->
             Do.do (commandLog prefix "b3sum" [ Path.toString inputPath ]) <| \body ->
-            case inputHash body of
+            case Internal.inputHash body of
                 Err e ->
                     BackendTask.fail (FatalError.fromString e)
 
@@ -233,8 +230,8 @@ input inputPath k =
         )
         |> andThen
             (\hash ->
-                derive {- "input" -} hash <| \{ prefix, buildPath } target ->
-                execLog prefix "cp" [ Path.toString inputPath, hashToPath buildPath target ]
+                Internal.derive {- "input" -} hash <| \{ prefix, buildPath } target ->
+                execLog prefix "cp" [ Path.toString inputPath, Internal.hashToPath buildPath target ]
             )
         |> andThen k
 
@@ -254,11 +251,11 @@ inputs inputPaths =
     Do.do (commandLog [] "b3sum" (List.map Path.toString inputPaths)) <| \body ->
     List.map2
         (\inputPath line ->
-            case inputHash line of
+            case Internal.inputHash line of
                 Ok hash ->
                     ( inputPath
-                    , derive {- "inputs" -} hash <| \{ prefix, buildPath } target ->
-                    execLog prefix "cp" [ Path.toString inputPath, hashToPath buildPath target ]
+                    , Internal.derive {- "inputs" -} hash <| \{ prefix, buildPath } target ->
+                    execLog prefix "cp" [ Path.toString inputPath, Internal.hashToPath buildPath target ]
                     )
                         |> Ok
 
@@ -269,69 +266,6 @@ inputs inputPaths =
         (String.lines body)
         |> Result.Extra.combine
         |> BackendTask.fromResult
-
-
-derive :
-    -- String ->
-    FileOrDirectory
-    ->
-        (Input
-         -> FileOrDirectory
-         -> BackendTask FatalError ()
-        )
-    -> Monad FileOrDirectory
-derive {- description -} target inner =
-    Monad "derive"
-        (\({ existing, buildPath } as input_) deps ->
-            let
-                newDeps : HashSet
-                newDeps =
-                    hashSetInsert target deps
-            in
-            -- Do.do
-            --     (appendLog
-            --         (hashToPath path   target
-            --             ++ ": "
-            --             ++ description
-            --             ++ " from "
-            --             ++ (prev
-            --                     |> Set.toList
-            --                     |> String.join ", "
-            --                )
-            --         )
-            --         |> BackendTask.quiet
-            --     )
-            -- <| \_ ->
-            if hashSetMember target existing || hashSetMember target deps then
-                BackendTask.succeed ( target, newDeps )
-
-            else
-                let
-                    tmp : FileOrDirectory
-                    tmp =
-                        hashToTmp target
-                in
-                Do.exec "rm" [ "-rf", hashToPath buildPath tmp ] <| \_ ->
-                Do.do
-                    (inner input_ tmp
-                        |> BackendTask.onError
-                            (\e ->
-                                Do.exec "rm" [ "-rf", hashToPath buildPath tmp ] <| \_ ->
-                                BackendTask.fail e
-                            )
-                    )
-                <| \_ ->
-                Do.exec "mv" [ hashToPath buildPath tmp, hashToPath buildPath target ] <| \_ ->
-                Do.exec "chmod" [ "-R", "a=rX", hashToPath buildPath target ] <| \_ ->
-                BackendTask.succeed ( target, newDeps )
-        )
-
-
-
--- appendLog : String -> BackendTask FatalError ()
--- appendLog line =
---     BackendTask.Custom.run "appendLog" (Json.Encode.string line) (Json.Decode.succeed ())
---         |> BackendTask.allowFatal
 
 
 type Tree
@@ -419,16 +353,16 @@ combineTree (Tree tree) =
         outputHash : FileOrDirectory
         outputHash =
             Dict.foldl
-                (\filename hash acc -> filename :: hashToString hash :: acc)
+                (\filename hash acc -> filename :: Internal.hashToString hash :: acc)
                 [ "combineTree" ]
                 combined
                 |> String.join "|"
-                |> stringToHash
+                |> Internal.stringToHash
     in
-    derive {- "combine" -} outputHash <| \{ prefix, buildPath } target ->
-    Do.do (execLog prefix "mkdir" [ "-p", hashToPath buildPath target ]) <| \_ ->
+    Internal.derive {- "combine" -} outputHash <| \{ prefix, buildPath } target ->
+    Do.do (execLog prefix "mkdir" [ "-p", Internal.hashToPath buildPath target ]) <| \_ ->
     combined
-        |> Dict.foldl (\outputFilename hash acc -> execLog prefix "cp" [ "-rl", hashToPath buildPath hash, hashToPath buildPath target ++ "/" ++ outputFilename ] :: acc) []
+        |> Dict.foldl (\outputFilename hash acc -> execLog prefix "cp" [ "-rl", Internal.hashToPath buildPath hash, Internal.hashToPath buildPath target ++ "/" ++ outputFilename ] :: acc) []
         |> BackendTask.Extra.combineBy_ parallelism
 
 
@@ -438,15 +372,15 @@ pipeThrough cmd args hash =
     let
         outputHash : FileOrDirectory
         outputHash =
-            extendHashWith (cmd :: args) hash
+            Internal.extendHashWith (cmd :: args) hash
     in
-    derive {- (String.join " " ("pipeThrough" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
+    Internal.derive {- (String.join " " ("pipeThrough" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
     BackendTask.Extra.timed
-        (String.join " " (prefix ++ "Piping" :: hashToPath buildPath hash :: "through" :: cmd :: args))
-        (String.join " " (prefix ++ "Piped " :: hashToPath buildPath hash :: "through" :: cmd :: args))
-        (Stream.fileRead (hashToPath buildPath hash)
+        (String.join " " (prefix ++ "Piping" :: Internal.hashToPath buildPath hash :: "through" :: cmd :: args))
+        (String.join " " (prefix ++ "Piped " :: Internal.hashToPath buildPath hash :: "through" :: cmd :: args))
+        (Stream.fileRead (Internal.hashToPath buildPath hash)
             |> Stream.pipe (Stream.command cmd args)
-            |> Stream.pipe (Stream.fileWrite (hashToPath buildPath target))
+            |> Stream.pipe (Stream.fileWrite (Internal.hashToPath buildPath target))
             |> Stream.run
         )
 
@@ -468,11 +402,11 @@ commandInReadonlyDirectory cmd args hash =
     let
         outputHash : FileOrDirectory
         outputHash =
-            extendHashWith (cmd :: args) hash
+            Internal.extendHashWith (cmd :: args) hash
     in
-    derive {- (String.join " " ("commandInReadonlyDirectory" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
-    Do.do (commandLog prefix cmd args |> BackendTask.inDir (hashToPath buildPath hash)) <| \output ->
-    BackendTask.allowFatal (Script.writeFile { path = hashToPath buildPath target, body = output })
+    Internal.derive {- (String.join " " ("commandInReadonlyDirectory" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
+    Do.do (commandLog prefix cmd args |> BackendTask.inDir (Internal.hashToPath buildPath hash)) <| \output ->
+    BackendTask.allowFatal (Script.writeFile { path = Internal.hashToPath buildPath target, body = output })
 
 
 {-| Run a command in a writable temporary directory seeded from a cached directory.
@@ -495,16 +429,16 @@ commandInWritableDirectory cmd args hash =
     let
         outputHash : FileOrDirectory
         outputHash =
-            extendHashWith (cmd :: args) hash
+            Internal.extendHashWith (cmd :: args) hash
     in
-    derive outputHash <| \{ prefix, buildPath } target ->
+    Internal.derive outputHash <| \{ prefix, buildPath } target ->
     let
         workspacePath : String
         workspacePath =
-            hashToPath buildPath (hashToWorkspace target)
+            Internal.hashToPath buildPath (Internal.hashToWorkspace target)
     in
     Do.exec "rm" [ "-rf", workspacePath ] <| \_ ->
-    Do.exec "cp" [ "-r", hashToPath buildPath hash, workspacePath ] <| \_ ->
+    Do.exec "cp" [ "-r", Internal.hashToPath buildPath hash, workspacePath ] <| \_ ->
     Do.exec "chmod" [ "-R", "u+w", workspacePath ] <| \_ ->
     Do.do
         (commandLog prefix cmd args
@@ -513,7 +447,7 @@ commandInWritableDirectory cmd args hash =
                 (Script.exec "rm" [ "-rf", workspacePath ])
         )
     <| \output ->
-    BackendTask.allowFatal (Script.writeFile { path = hashToPath buildPath target, body = output })
+    BackendTask.allowFatal (Script.writeFile { path = Internal.hashToPath buildPath target, body = output })
 
 
 {-| Run a command passing in a file (or directory) as last argument and save the result to a file.
@@ -530,11 +464,11 @@ commandWithFile cmd args hash =
     let
         outputHash : FileOrDirectory
         outputHash =
-            extendHashWith (cmd :: args) hash
+            Internal.extendHashWith (cmd :: args) hash
     in
-    derive {- (String.join " " ("commandWithFile" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
-    Do.do (commandLog prefix cmd (args ++ [ hashToPath buildPath hash ])) <| \output ->
-    BackendTask.allowFatal (Script.writeFile { path = hashToPath buildPath target, body = output })
+    Internal.derive {- (String.join " " ("commandWithFile" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
+    Do.do (commandLog prefix cmd (args ++ [ Internal.hashToPath buildPath hash ])) <| \output ->
+    BackendTask.allowFatal (Script.writeFile { path = Internal.hashToPath buildPath target, body = output })
 
 
 {-| -}
@@ -579,8 +513,8 @@ withFile : FileOrDirectory -> (String -> Monad a) -> Monad a
 withFile hash f =
     Monad "withFile"
         (\({ buildPath } as input_) deps ->
-            Do.allowFatal (File.rawFile (hashToPath buildPath hash)) <| \raw ->
-            runMonad (f raw) input_ (hashSetInsert hash deps)
+            Do.allowFatal (File.rawFile (Internal.hashToPath buildPath hash)) <| \raw ->
+            runMonad (f raw) input_ (Internal.hashSetInsert hash deps)
         )
 
 
@@ -590,10 +524,10 @@ writeFile content =
     let
         hash : FileOrDirectory
         hash =
-            stringToHash content
+            Internal.stringToHash content
     in
-    derive {- "writeFile" -} hash <| \{ buildPath } target ->
-    BackendTask.allowFatal (Script.writeFile { path = hashToPath buildPath target, body = content })
+    Internal.derive {- "writeFile" -} hash <| \{ buildPath } target ->
+    BackendTask.allowFatal (Script.writeFile { path = Internal.hashToPath buildPath target, body = content })
 
 
 {-| -}
@@ -609,14 +543,14 @@ run config buildPath m =
             , jobs = config.jobs
             }
     in
-    runMonad m input_ hashSetEmpty
+    runMonad m input_ Internal.hashSetEmpty
         |> BackendTask.map
             (\( output, deps ) ->
-                { output = Path.path (hashToPath buildPath output)
+                { output = Path.path (Internal.hashToPath buildPath output)
                 , dependencies =
                     deps
-                        |> hashSetToList
-                        |> List.map (\raw -> raw |> hashToPath buildPath |> Path.path)
+                        |> Internal.hashSetToList
+                        |> List.map (\raw -> raw |> Internal.hashToPath buildPath |> Path.path)
                 }
             )
 
@@ -627,10 +561,7 @@ listExisting path =
         (Json.Encode.string (Path.toString path))
         (Json.Decode.list Json.Decode.string)
         |> BackendTask.allowFatal
-        |> BackendTask.map
-            (\raw ->
-                HashSet (innerHashSetFromList raw)
-            )
+        |> BackendTask.map Internal.hashSetFromList
 
 
 {-| -}
@@ -653,9 +584,9 @@ combineBy n ops =
                                     |> List.sortBy (\( i, _ ) -> -i)
                                     |> List.foldl
                                         (\( _, ( res, newDeps ) ) ( resAcc, depsAcc ) ->
-                                            ( res :: resAcc, hashSetUnion newDeps depsAcc )
+                                            ( res :: resAcc, Internal.hashSetUnion newDeps depsAcc )
                                         )
-                                        ( [], hashSetEmpty )
+                                        ( [], Internal.hashSetEmpty )
                             )
         )
 
@@ -682,7 +613,7 @@ sequence ops =
                         (\res ->
                             res
                                 |> List.unzip
-                                |> Tuple.mapSecond (List.foldl hashSetUnion hashSetEmpty)
+                                |> Tuple.mapSecond (List.foldl Internal.hashSetUnion Internal.hashSetEmpty)
                         )
         )
 
@@ -752,226 +683,3 @@ jobs =
             in
             task |> BackendTask.map (\j -> ( j, deps ))
         )
-
-
-
-------------
--- HASHES --
-------------
-
-
-{-| -}
-type FileOrDirectory
-    = Hash String
-
-
-{-| Build an hashed file from the output of shaXsum/b3sum.
--}
-inputHash : String -> Result String FileOrDirectory
-inputHash raw =
-    let
-        clean : String
-        clean =
-            String.left 8 raw
-    in
-    Hex.fromString clean
-        |> Result.map (\_ -> Hash clean)
-
-
-hashToPath : Path -> FileOrDirectory -> String
-hashToPath buildPath (Hash hash) =
-    Path.toString buildPath ++ "/" ++ hash
-
-
-hashToString : FileOrDirectory -> String
-hashToString (Hash hash) =
-    hash
-
-
-hashToTmp : FileOrDirectory -> FileOrDirectory
-hashToTmp (Hash hash) =
-    Hash ("tmp-" ++ hash)
-
-
-hashToWorkspace : FileOrDirectory -> FileOrDirectory
-hashToWorkspace (Hash hash) =
-    Hash ("workspace-" ++ hash)
-
-
-extendHashWith : List String -> FileOrDirectory -> FileOrDirectory
-extendHashWith l (Hash r) =
-    stringToHash (String.join "|" (r :: l))
-
-
-stringToHash : String -> FileOrDirectory
-stringToHash raw =
-    raw
-        |> FNV1a.hash
-        |> Hex.toString
-        |> String.padLeft 8 '0'
-        |> Hash
-
-
-type HashSet
-    = HashSet (BST String)
-
-
-type BST a
-    = BSTNode a (BST a) (BST a)
-    | BSTLeaf
-
-
-hashSetEmpty : HashSet
-hashSetEmpty =
-    HashSet BSTLeaf
-
-
-hashSetMember : FileOrDirectory -> HashSet -> Bool
-hashSetMember (Hash x) (HashSet s) =
-    innerHashSetMember x s
-
-
-innerHashSetMember : comparable -> BST comparable -> Bool
-innerHashSetMember k t =
-    case t of
-        BSTLeaf ->
-            False
-
-        BSTNode nk l r ->
-            case compare k nk of
-                EQ ->
-                    True
-
-                LT ->
-                    innerHashSetMember k l
-
-                GT ->
-                    innerHashSetMember k r
-
-
-hashSetInsert : FileOrDirectory -> HashSet -> HashSet
-hashSetInsert (Hash x) (HashSet s) =
-    HashSet (innerHashSetInsert x s |> Maybe.withDefault s)
-
-
-innerHashSetInsert : comparable -> BST comparable -> Maybe (BST comparable)
-innerHashSetInsert k t =
-    case t of
-        BSTLeaf ->
-            Just (BSTNode k BSTLeaf BSTLeaf)
-
-        BSTNode nk l r ->
-            case compare k nk of
-                EQ ->
-                    Nothing
-
-                LT ->
-                    case innerHashSetInsert k l of
-                        Nothing ->
-                            Nothing
-
-                        Just nl ->
-                            Just (BSTNode nk nl r)
-
-                GT ->
-                    case innerHashSetInsert k r of
-                        Nothing ->
-                            Nothing
-
-                        Just nr ->
-                            Just (BSTNode nk l nr)
-
-
-hashSetUnion : HashSet -> HashSet -> HashSet
-hashSetUnion (HashSet a) (HashSet b) =
-    HashSet (innerHashSetUnion a b)
-
-
-innerHashSetUnion : BST comparable -> BST comparable -> BST comparable
-innerHashSetUnion l r =
-    case l of
-        BSTLeaf ->
-            r
-
-        BSTNode lk ll lr ->
-            let
-                ( rl, rr ) =
-                    split lk r
-            in
-            BSTNode lk (innerHashSetUnion ll rl) (innerHashSetUnion lr rr)
-
-
-split : comparable -> BST comparable -> ( BST comparable, BST comparable )
-split k t =
-    case t of
-        BSTLeaf ->
-            ( BSTLeaf, BSTLeaf )
-
-        BSTNode nk l r ->
-            case compare k nk of
-                EQ ->
-                    ( l, r )
-
-                LT ->
-                    let
-                        ( ll, lr ) =
-                            split k l
-                    in
-                    ( ll, BSTNode nk lr r )
-
-                GT ->
-                    let
-                        ( rl, rr ) =
-                            split k r
-                    in
-                    ( BSTNode nk l rl, rr )
-
-
-hashSetToList : HashSet -> List FileOrDirectory
-hashSetToList (HashSet s) =
-    innerHashSetToList s
-        |> List.map Hash
-
-
-innerHashSetToList : BST a -> List a
-innerHashSetToList s =
-    let
-        go : BST a -> List a -> List a
-        go t acc =
-            case t of
-                BSTLeaf ->
-                    acc
-
-                BSTNode k l r ->
-                    go l acc
-                        |> (::) k
-                        |> go r
-    in
-    go s []
-
-
-innerHashSetFromList : List comparable -> BST comparable
-innerHashSetFromList list =
-    let
-        arr : Array comparable
-        arr =
-            Array.fromList (List.sort list)
-
-        go fromIncluded toExcluded =
-            if fromIncluded >= toExcluded then
-                BSTLeaf
-
-            else
-                let
-                    mid : Int
-                    mid =
-                        fromIncluded + (toExcluded - fromIncluded) // 2
-                in
-                case Array.get mid arr of
-                    Nothing ->
-                        BSTLeaf
-
-                    Just k ->
-                        BSTNode k (go fromIncluded mid) (go (mid + 1) toExcluded)
-    in
-    go 0 (Array.length arr)
