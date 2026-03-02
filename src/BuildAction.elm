@@ -26,7 +26,6 @@ import List.Extra
 import Maybe.Extra
 import Path exposing (Path)
 import String.Extra
-import String.Multiline
 
 
 type ProcessedFile
@@ -90,6 +89,14 @@ buildAction config inputs =
         fontFiles =
             List.filterMap asFont processedFiles
 
+        imageFiles :
+            List
+                { original : HashedFileWith { width : Int, height : Int }
+                , converted : List (HashedFileWith { width : Int })
+                }
+        imageFiles =
+            List.filterMap asImage processedFiles
+
         publicFolder : Cache.Monad FileOrDirectory
         publicFolder =
             Do.writeFile (Font.toCssFile fontFiles) <| \fontsCssHash ->
@@ -104,7 +111,7 @@ buildAction config inputs =
     Do.map4 T4
         (ElmCodegen.elmCodegen (imagesElmFile processedFiles))
         (ElmCodegen.elmCodegen (fontsElmFile fontFiles))
-        (imagesSizesFile processedFiles)
+        (imagesSizesFile imageFiles)
         publicFolder
     <| \(T4 imagesElm fontsElm imageSizes public) ->
     Cache.combine
@@ -113,6 +120,28 @@ buildAction config inputs =
         , { filename = Path.path "image-sizes", hash = imageSizes }
         , { filename = Path.path "public", hash = public }
         ]
+
+
+asImage :
+    ProcessedFile
+    ->
+        Maybe
+            { original : HashedFileWith { width : Int, height : Int }
+            , converted : List (HashedFileWith { width : Int })
+            }
+asImage file =
+    case file of
+        ProcessedImage data ->
+            Just data
+
+        ProcessedCss _ ->
+            Nothing
+
+        ProcessedSvg _ ->
+            Nothing
+
+        ProcessedFont _ ->
+            Nothing
 
 
 asFont : ProcessedFile -> Maybe (HashedFileWith Font.Data)
@@ -126,33 +155,29 @@ asFont file =
 
 
 imagesSizesFile :
-    List ProcessedFile
+    List
+        { a
+            | original : HashedFileWith { width : Int, height : Int }
+        }
     -> Cache.Monad FileOrDirectory
 imagesSizesFile processedFiles =
     let
         content : String
         content =
             processedFiles
-                |> List.filterMap
-                    (\file ->
-                        case file of
-                            ProcessedImage { original } ->
-                                let
-                                    name : String
-                                    name =
-                                        Path.toString original.filename
-                                            |> String.replace " " "_"
-                                in
-                                (name
-                                    ++ ": "
-                                    ++ String.fromInt original.width
-                                    ++ "x"
-                                    ++ String.fromInt original.height
-                                )
-                                    |> Just
-
-                            _ ->
-                                Nothing
+                |> List.map
+                    (\{ original } ->
+                        let
+                            name : String
+                            name =
+                                Path.toString original.filename
+                                    |> String.replace " " "_"
+                        in
+                        name
+                            ++ ": "
+                            ++ String.fromInt original.width
+                            ++ "x"
+                            ++ String.fromInt original.height
                     )
                 |> String.join "\n"
     in
