@@ -2,6 +2,7 @@ module Build exposing (run)
 
 import Ansi.Color
 import BackendTask exposing (BackendTask)
+import BackendTask.Customs
 import BackendTask.Do as Do
 import BackendTask.Extra
 import BackendTask.Time
@@ -101,7 +102,7 @@ task config =
             }
         <| \_ ->
         Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Output: " ++ Path.toString combined.output) <| \_ ->
-        Do.glob (Path.toString config.buildDirectory ++ "/*") <| \actualList ->
+        Do.do (BackendTask.Customs.readdir config.buildDirectory) <| \actualList ->
         let
             expected : Set String
             expected =
@@ -111,7 +112,9 @@ task config =
 
             actual : Set String
             actual =
-                Set.fromList actualList
+                actualList
+                    |> List.map (\file -> Path.toString config.buildDirectory ++ "/" ++ file)
+                    |> Set.fromList
 
             unexpected : Set String
             unexpected =

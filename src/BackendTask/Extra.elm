@@ -2,12 +2,10 @@ module BackendTask.Extra exposing (combine, combineBy, combineBy_, finally, prof
 
 import Array exposing (Array)
 import BackendTask exposing (BackendTask)
-import BackendTask.Custom
+import BackendTask.Customs
 import BackendTask.Do as Do
 import BackendTask.Time
 import FatalError exposing (FatalError)
-import Json.Decode
-import Json.Encode
 import List.Extra
 import Pages.Script.Spinner as Spinner
 import Rope exposing (Rope)
@@ -234,18 +232,10 @@ sequence_ inputs =
 
 profiling : String -> BackendTask FatalError a -> BackendTask FatalError a
 profiling label t =
-    BackendTask.Custom.run "profile" (Json.Encode.string label) (Json.Decode.succeed ())
-        |> BackendTask.allowFatal
-        |> BackendTask.andThen
-            (\() ->
-                t
-            )
-        |> BackendTask.andThen
-            (\res ->
-                BackendTask.Custom.run "profileEnd" (Json.Encode.string label) (Json.Decode.succeed ())
-                    |> BackendTask.allowFatal
-                    |> BackendTask.map (\() -> res)
-            )
+    Do.do (BackendTask.Customs.profile label) <| \_ ->
+    Do.do t <| \res ->
+    Do.do (BackendTask.Customs.profileEnd label) <| \_ ->
+    BackendTask.succeed res
 
 
 finally : BackendTask e () -> BackendTask e a -> BackendTask e a

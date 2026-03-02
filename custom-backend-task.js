@@ -20,7 +20,7 @@ export function readdir(path) {
     return fs.readdir(path);
 }
 
-export async function exists(path) {
+export async function fileExists(path) {
     try {
         await fs.stat(path, {});
         return true;

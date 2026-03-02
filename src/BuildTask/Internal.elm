@@ -2,7 +2,7 @@ module BuildTask.Internal exposing (BuildTask(..), Hash, HashSet, Input, andThen
 
 import BST exposing (BST)
 import BackendTask exposing (BackendTask)
-import BackendTask.Custom
+import BackendTask.Customs
 import BackendTask.Do as Do
 import BackendTask.Extra
 import BackendTask.File as File
@@ -10,7 +10,6 @@ import BackendTask.Stream as Stream
 import FNV1a
 import FatalError exposing (FatalError)
 import Hex
-import Json.Decode
 import Json.Encode
 import Pages.Script as Script
 import Path exposing (Path)
@@ -74,7 +73,7 @@ derive description target inner =
                 BackendTask.succeed ( target, newDeps )
 
             else
-                Do.do (fileExists (hashToPath buildPath target)) <| \exists ->
+                Do.do (BackendTask.Customs.fileExists (hashToPath buildPath target)) <| \exists ->
                 if exists then
                     BackendTask.succeed ( target, newDeps )
 
@@ -98,8 +97,7 @@ derive description target inner =
                         (Script.exec "mv" [ hashToPath buildPath tmp, hashToPath buildPath target ]
                             |> BackendTask.onError
                                 (\e ->
-                                    Do.do (fileExists (hashToPath buildPath target)) <| \exists2 ->
-                                    Do.log ("Error inside " ++ description ++ ", exists " ++ hashToPath buildPath target ++ ": " ++ Debug.toString exists2) <| \_ ->
+                                    Do.log ("Error inside " ++ description) <| \_ ->
                                     BackendTask.fail e
                                 )
                         )
@@ -107,12 +105,6 @@ derive description target inner =
                     Do.exec "chmod" [ "-R", "a=rX", hashToPath buildPath target ] <| \_ ->
                     BackendTask.succeed ( target, newDeps )
         )
-
-
-fileExists : String -> BackendTask FatalError Bool
-fileExists path =
-    BackendTask.Custom.run "exists" (Json.Encode.string path) Json.Decode.bool
-        |> BackendTask.allowFatal
 
 
 runMonad : BuildTask a -> Input -> HashSet -> BackendTask FatalError ( a, HashSet )
@@ -258,10 +250,7 @@ run config buildPath m =
 
 listExisting : Path -> BackendTask FatalError HashSet
 listExisting path =
-    BackendTask.Custom.run "readdir"
-        (Json.Encode.string (Path.toString path))
-        (Json.Decode.list Json.Decode.string)
-        |> BackendTask.allowFatal
+    BackendTask.Customs.readdir path
         |> BackendTask.map hashSetFromList
 
 
@@ -395,8 +384,8 @@ triggerDebugger : BuildTask ()
 triggerDebugger =
     BuildTask "triggerDebugger"
         (\_ deps ->
-            BackendTask.Custom.run "triggerDebugger" Json.Encode.null (Json.Decode.succeed ( (), deps ))
-                |> BackendTask.allowFatal
+            BackendTask.Customs.triggerDebugger
+                |> BackendTask.map (\() -> ( (), deps ))
         )
 
 
