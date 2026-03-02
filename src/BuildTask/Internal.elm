@@ -544,7 +544,7 @@ named name encode action param =
     BuildTask "named"
         (\input_ deps ->
             if hashSetMember target input_.existing || hashSetMember target deps then
-                BackendTask.succeed ( target, deps )
+                BackendTask.succeed ( target, hashSetInsert target deps )
 
             else
                 runMonad (action param) input_ deps
@@ -555,6 +555,6 @@ named name encode action param =
                                 , hashToPath input_.buildPath target
                                 ]
                             <| \_ ->
-                            BackendTask.succeed ( target, newDeps )
+                            BackendTask.succeed ( target, hashSetInsert target newDeps )
                         )
         )
