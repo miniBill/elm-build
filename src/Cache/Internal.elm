@@ -9,7 +9,6 @@ import BackendTask.File as File
 import BackendTask.Stream as Stream
 import FNV1a
 import FatalError exposing (FatalError)
-import Gen.Html exposing (i)
 import Hex
 import Json.Decode
 import Json.Encode
