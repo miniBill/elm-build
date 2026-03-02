@@ -86,25 +86,39 @@ buildAction config inputs =
         )
     <| \processedFiles ->
     let
+        fontFiles : List (HashedFileWith Font.Data)
+        fontFiles =
+            List.filterMap asFont processedFiles
+
         publicFolder : Cache.Monad FileOrDirectory
         publicFolder =
-            fontsCssFile processedFiles <| \fontsCss ->
+            fontsCssFile fontFiles <| \fontsCss ->
             (fontsCss :: List.concatMap processedFileToFileList processedFiles)
                 |> Cache.combine
                 |> Cache.withPrefix ("[" ++ String.fromInt inputSize ++ "/" ++ String.fromInt inputSize ++ "]")
     in
     Do.map4 T4
         (ElmCodegen.elmCodegen (imagesElmFile processedFiles))
-        (ElmCodegen.elmCodegen (fontsElmFile processedFiles))
+        (ElmCodegen.elmCodegen (fontsElmFile fontFiles))
         (imagesSizesFile processedFiles)
         publicFolder
-    <| \(T4 imagesElm imageSizes fontsElm public) ->
+    <| \(T4 imagesElm fontsElm imageSizes public) ->
     Cache.combine
         [ imagesElm
         , fontsElm
         , { filename = Path.path "image-sizes", hash = imageSizes }
         , { filename = Path.path "public", hash = public }
         ]
+
+
+asFont : ProcessedFile -> Maybe (HashedFileWith Font.Data)
+asFont file =
+    case file of
+        ProcessedFont data ->
+            Just data
+
+        _ ->
+            Nothing
 
 
 imagesSizesFile :
@@ -142,7 +156,7 @@ imagesSizesFile processedFiles =
 
 
 fontsCssFile :
-    List ProcessedFile
+    List (HashedFileWith Font.Data)
     -> ({ filename : Path, hash : FileOrDirectory } -> Cache.Monad a)
     -> Cache.Monad a
 fontsCssFile files k =
@@ -150,20 +164,15 @@ fontsCssFile files k =
         content : String
         content =
             files
-                |> List.filterMap
-                    (\file ->
-                        case file of
-                            ProcessedFont { family, style, weight, filename } ->
-                                Just (String.Multiline.here """
-                                    @font-face {
-                                        font-family: \"""" ++ family ++ """";
-                                        font-style: """ ++ Font.styleToString style ++ """;
-                                        font-weight: """ ++ String.fromInt (Font.weightToNumber weight) ++ """;
-                                        src: url(\"""" ++ Path.toString filename ++ """");
-                                    }""")
-
-                            _ ->
-                                Nothing
+                |> List.map
+                    (\{ family, style, weight, filename } ->
+                        String.Multiline.here """
+                            @font-face {
+                                font-family: \"""" ++ family ++ """";
+                                font-style: """ ++ Font.styleToString style ++ """;
+                                font-weight: """ ++ String.fromInt (Font.weightToNumber weight) ++ """;
+                                src: url(\"""" ++ Path.toString filename ++ """");
+                            }"""
                     )
                 |> String.join "\n\n"
     in
@@ -171,18 +180,10 @@ fontsCssFile files k =
     k { filename = Path.path "fonts.css", hash = hash }
 
 
-fontsElmFile : List ProcessedFile -> Elm.File
+fontsElmFile : List (HashedFileWith Font.Data) -> Elm.File
 fontsElmFile files =
     files
-        |> List.filterMap
-            (\file ->
-                case file of
-                    ProcessedFont { family } ->
-                        Just family
-
-                    _ ->
-                        Nothing
-            )
+        |> List.map .family
         |> List.Extra.unique
         |> List.map
             (\family ->
