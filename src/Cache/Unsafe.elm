@@ -3,7 +3,7 @@ module Cache.Unsafe exposing (named)
 {-| -}
 
 import Cache exposing (FileOrDirectory)
-import Json.Encode
+import Cache.Internal as Internal
 
 
 {-| Defines a named step. This function is useful to define steps where a computation is expensive,
@@ -24,7 +24,7 @@ Example:
 
     foo : String -> Cache.Monad FileOrDirectory
     foo =
-        Cache.Unsafe.named "Example.Mod.foo" Json.Encode.string (\input ->
+        Cache.Unsafe.named "Example.Mod.foo" identity (\input ->
             -- do something with the input
         )
 
@@ -33,6 +33,6 @@ Notice how `foo` is a function but the definition doesn't specify any explicit p
 This approach is inspired by [noredink/elm-review-html-lazy](https://package.elm-lang.org/packages/noredink/elm-review-html-lazy/latest/UseMemoizedLazyLambda).
 
 -}
-named : String -> (a -> Json.Encode.Value) -> (a -> Cache.Monad FileOrDirectory) -> a -> Cache.Monad FileOrDirectory
+named : String -> (a -> String) -> (a -> Cache.Monad FileOrDirectory) -> a -> Cache.Monad FileOrDirectory
 named name encode action param =
-    Debug.todo "Cache.Unsafe.named"
+    Internal.named name encode action param

@@ -1,4 +1,4 @@
-module Cache.Internal exposing (Hash, HashSet, Input, Monad(..), andThen, combineBy, commandLog, derive, execLog, extendHashWith, fail, hashToPath, hashToString, hashToWorkspace, input, inputHash, jobs, map, map2, map3, map4, run, sequence, stringToHash, succeed, timed, triggerDebugger, withFile, withPrefix)
+module Cache.Internal exposing (Hash, HashSet, Input, Monad(..), andThen, combineBy, commandLog, derive, execLog, extendHashWith, fail, hashToPath, hashToString, hashToWorkspace, input, inputHash, jobs, jsonToHash, map, map2, map3, map4, named, run, sequence, stringToHash, succeed, timed, triggerDebugger, withFile, withPrefix)
 
 import BST exposing (BST)
 import BackendTask exposing (BackendTask)
@@ -9,6 +9,7 @@ import BackendTask.File as File
 import BackendTask.Stream as Stream
 import FNV1a
 import FatalError exposing (FatalError)
+import Gen.Html exposing (i)
 import Hex
 import Json.Decode
 import Json.Encode
@@ -526,3 +527,30 @@ hashSetFromList list =
     list
         |> BST.fromList
         |> HashSet
+
+
+named : String -> (a -> String) -> (a -> Monad Hash) -> a -> Monad Hash
+named name encode action param =
+    let
+        target : Hash
+        target =
+            (name ++ "|" ++ encode param)
+                |> stringToHash
+    in
+    Monad "named"
+        (\input_ deps ->
+            if hashSetMember target input_.existing || hashSetMember target deps then
+                BackendTask.succeed ( target, deps )
+
+            else
+                runMonad (action param) input_ deps
+                    |> BackendTask.andThen
+                        (\( actionOutput, newDeps ) ->
+                            Do.exec "mv"
+                                [ hashToPath input_.buildPath actionOutput
+                                , hashToPath input_.buildPath target
+                                ]
+                            <| \_ ->
+                            BackendTask.succeed ( target, newDeps )
+                        )
+        )
