@@ -1,11 +1,18 @@
-module Cache.Internal exposing (Hash, HashSet, Monad(..), derive, extendHashWith, hashSetEmpty, hashSetFromList, hashSetInsert, hashSetMember, hashSetToList, hashSetUnion, hashToPath, hashToString, hashToTmp, hashToWorkspace, inputHash, stringToHash)
+module Cache.Internal exposing (Hash, HashSet, Monad(..), andThen, combineBy, commandLog, derive, execLog, extendHashWith, fail, hashSetEmpty, hashSetFromList, hashSetInsert, hashSetMember, hashSetToList, hashSetUnion, hashToPath, hashToString, hashToTmp, hashToWorkspace, input, inputHash, jobs, map, map2, map3, map4, run, runMonad, sequence, stringToHash, succeed, timed, triggerDebugger, withFile, withPrefix)
 
 import BST exposing (BST)
 import BackendTask exposing (BackendTask)
+import BackendTask.Custom
 import BackendTask.Do as Do
+import BackendTask.Extra
+import BackendTask.File as File
+import BackendTask.Stream as Stream
 import FNV1a
 import FatalError exposing (FatalError)
 import Hex
+import Json.Decode
+import Json.Encode
+import Pages.Script as Script
 import Path exposing (Path)
 
 
@@ -180,3 +187,342 @@ hashSetFromList list =
     list
         |> BST.fromList
         |> HashSet
+
+
+debug : Bool
+debug =
+    False
+
+
+runMonad : Monad a -> Input -> HashSet -> BackendTask FatalError ( a, HashSet )
+runMonad (Monad label m) input_ deps =
+    if debug then
+        m input_ deps
+            |> BackendTask.andThen
+                (\( v, newDeps ) ->
+                    if hashSetToList (hashSetUnion deps newDeps) == hashSetToList newDeps then
+                        BackendTask.succeed ( v, newDeps )
+
+                    else
+                        BackendTask.fail (FatalError.fromString ("Missed dependency inside " ++ label))
+                )
+
+    else
+        m input_ deps
+
+
+{-| -}
+map : (a -> b) -> Monad a -> Monad b
+map f m =
+    Monad "map"
+        (\input_ deps ->
+            runMonad m input_ deps
+                |> BackendTask.map
+                    (\( v, newDeps ) ->
+                        ( f v, newDeps )
+                    )
+        )
+
+
+{-| -}
+map2 :
+    (a -> b -> c)
+    -> Monad a
+    -> Monad b
+    -> Monad c
+map2 f a b =
+    Monad "map2"
+        (\input_ deps ->
+            BackendTask.map2
+                (\( va, depsA ) ( vb, depsB ) ->
+                    ( f va vb, hashSetUnion depsA depsB )
+                )
+                (runMonad a input_ deps)
+                (runMonad b input_ deps)
+        )
+
+
+{-| -}
+map3 :
+    (a -> b -> c -> d)
+    -> Monad a
+    -> Monad b
+    -> Monad c
+    -> Monad d
+map3 f a b c =
+    Monad "map3"
+        (\input_ deps ->
+            BackendTask.map3
+                (\( va, depsA ) ( vb, depsB ) ( vc, depsC ) ->
+                    ( f va vb vc, hashSetUnion depsA depsB |> hashSetUnion depsC )
+                )
+                (runMonad a input_ deps)
+                (runMonad b input_ deps)
+                (runMonad c input_ deps)
+        )
+
+
+{-| -}
+map4 :
+    (a -> b -> c -> d -> e)
+    -> Monad a
+    -> Monad b
+    -> Monad c
+    -> Monad d
+    -> Monad e
+map4 f a b c d =
+    Monad "map4"
+        (\input_ deps ->
+            BackendTask.map4
+                (\( va, depsA ) ( vb, depsB ) ( vc, depsC ) ( vd, depsD ) ->
+                    ( f va vb vc vd
+                    , hashSetUnion
+                        (hashSetUnion depsA depsB)
+                        (hashSetUnion depsC depsD)
+                    )
+                )
+                (runMonad a input_ deps)
+                (runMonad b input_ deps)
+                (runMonad c input_ deps)
+                (runMonad d input_ deps)
+        )
+
+
+{-| -}
+andThen : (a -> Monad b) -> Monad a -> Monad b
+andThen f m =
+    Monad "andThen"
+        (\input_ deps ->
+            runMonad m input_ deps
+                |> BackendTask.andThen
+                    (\( v, newDeps ) ->
+                        runMonad (f v) input_ newDeps
+                    )
+        )
+
+
+withFile : Hash -> (String -> Monad a) -> Monad a
+withFile hash f =
+    Monad "withFile"
+        (\({ buildPath } as input_) deps ->
+            Do.allowFatal (File.rawFile (hashToPath buildPath hash)) <| \raw ->
+            runMonad (f raw) input_ (hashSetInsert hash deps)
+        )
+
+
+run : { jobs : Maybe Int } -> Path -> Monad Hash -> BackendTask FatalError { output : Path, intermediate : List Path }
+run config buildPath m =
+    Do.do (listExisting buildPath) <| \existing ->
+    let
+        input_ : Input
+        input_ =
+            { existing = existing
+            , prefix = []
+            , buildPath = buildPath
+            , jobs = config.jobs
+            }
+    in
+    runMonad m input_ hashSetEmpty
+        |> BackendTask.map
+            (\( output, deps ) ->
+                { output = Path.path (hashToPath buildPath output)
+                , intermediate =
+                    deps
+                        |> hashSetToList
+                        |> List.map (\raw -> raw |> hashToPath buildPath |> Path.path)
+                }
+            )
+
+
+listExisting : Path -> BackendTask FatalError HashSet
+listExisting path =
+    BackendTask.Custom.run "readdir"
+        (Json.Encode.string (Path.toString path))
+        (Json.Decode.list Json.Decode.string)
+        |> BackendTask.allowFatal
+        |> BackendTask.map hashSetFromList
+
+
+combineBy : Int -> List (Monad a) -> Monad (List a)
+combineBy n ops =
+    Monad "combineBy"
+        (\input_ deps ->
+            case ops of
+                [] ->
+                    BackendTask.succeed ( [], deps )
+
+                _ :: _ ->
+                    ops
+                        |> List.indexedMap
+                            (\i m -> BackendTask.map (Tuple.pair i) (runMonad m input_ deps))
+                        |> BackendTask.Extra.combineBy n
+                        |> BackendTask.map
+                            (\resList ->
+                                resList
+                                    |> List.sortBy (\( i, _ ) -> -i)
+                                    |> List.foldl
+                                        (\( _, ( res, newDeps ) ) ( resAcc, depsAcc ) ->
+                                            ( res :: resAcc, hashSetUnion newDeps depsAcc )
+                                        )
+                                        ( [], hashSetEmpty )
+                            )
+        )
+
+
+sequence : List (Monad a) -> Monad (List a)
+sequence ops =
+    Monad "sequence"
+        (\input_ deps ->
+            if List.isEmpty ops then
+                BackendTask.succeed ( [], deps )
+
+            else
+                ops
+                    |> List.map (\m -> runMonad m input_ deps)
+                    |> BackendTask.sequence
+                    |> BackendTask.map
+                        (\res ->
+                            res
+                                |> List.unzip
+                                |> Tuple.mapSecond (List.foldl hashSetUnion hashSetEmpty)
+                        )
+        )
+
+
+timed : String -> String -> Monad a -> Monad a
+timed before after task =
+    Monad "timed" (\input_ deps -> BackendTask.Extra.timed before after (runMonad task input_ deps))
+
+
+withPrefix : String -> Monad a -> Monad a
+withPrefix newPrefix m =
+    Monad "withPrefix" (\input_ deps -> runMonad m { input_ | prefix = newPrefix :: input_.prefix } deps)
+
+
+jobs : Monad Int
+jobs =
+    let
+        tryRunningOrElse :
+            String
+            -> List String
+            -> (() -> BackendTask FatalError Int)
+            -> BackendTask FatalError Int
+        tryRunningOrElse cmd args orElse =
+            Do.do (Script.command cmd args |> BackendTask.toResult) <| \nprocResult ->
+            case nprocResult of
+                Ok output ->
+                    let
+                        trimmed : String
+                        trimmed =
+                            String.trim output
+                    in
+                    case String.toInt trimmed of
+                        Nothing ->
+                            let
+                                message : String
+                                message =
+                                    "Invalid " ++ String.join " " (cmd :: args) ++ " output: " ++ Json.Encode.encode 0 (Json.Encode.string trimmed)
+                            in
+                            BackendTask.fail (FatalError.fromString message)
+
+                        Just j ->
+                            BackendTask.succeed j
+
+                Err _ ->
+                    orElse ()
+    in
+    Monad "jobs"
+        (\input_ deps ->
+            let
+                task : BackendTask FatalError Int
+                task =
+                    case input_.jobs of
+                        Just j ->
+                            BackendTask.succeed j
+
+                        Nothing ->
+                            tryRunningOrElse "nproc" [ "--all" ] <| \_ ->
+                            tryRunningOrElse "sysctl" [ "-n", "hw.logicalcpu" ] <| \_ ->
+                            let
+                                message : String
+                                message =
+                                    "Failed to run either `nproc --all` or `sysctl -n hw.logicalcpu`. You can work around this by specifying an explicit number of jobs to run in parallel"
+                            in
+                            BackendTask.fail (FatalError.fromString message)
+            in
+            task |> BackendTask.map (\j -> ( j, deps ))
+        )
+
+
+succeed : a -> Monad a
+succeed v =
+    Monad "succeed" (\_ deps -> BackendTask.succeed ( v, deps ))
+
+
+fail : String -> Monad a
+fail msg =
+    triggerDebugger
+        |> andThen
+            (\_ ->
+                Monad "fail"
+                    (\_ _ -> BackendTask.fail (FatalError.fromString msg))
+            )
+
+
+triggerDebugger : Monad ()
+triggerDebugger =
+    Monad "triggerDebugger"
+        (\_ deps ->
+            BackendTask.Custom.run "triggerDebugger" Json.Encode.null (Json.Decode.succeed ( (), deps ))
+                |> BackendTask.allowFatal
+        )
+
+
+input : Path -> Monad Hash
+input inputPath =
+    Monad "input"
+        (\{ prefix } deps ->
+            Do.do (commandLog prefix "b3sum" [ Path.toString inputPath ]) <| \body ->
+            case inputHash body of
+                Err e ->
+                    BackendTask.fail (FatalError.fromString e)
+
+                Ok hash ->
+                    BackendTask.succeed ( hash, deps )
+        )
+        |> andThen
+            (\hash ->
+                derive {- "input" -} hash <| \{ prefix, buildPath } target ->
+                execLog prefix "cp" [ Path.toString inputPath, hashToPath buildPath target ]
+            )
+
+
+{-| -}
+commandLog : List String -> String -> List String -> BackendTask FatalError String
+commandLog prefix cmd args =
+    logCommand prefix
+        cmd
+        args
+        (Stream.commandWithOptions
+            (Stream.defaultCommandOptions |> Stream.withOutput Stream.PrintStderr)
+            cmd
+            args
+            |> Stream.read
+            |> BackendTask.map .body
+            |> BackendTask.allowFatal
+        )
+
+
+{-| -}
+logCommand : List String -> String -> List String -> BackendTask error a -> BackendTask error a
+logCommand prefix cmd args task =
+    BackendTask.Extra.timed
+        (String.join " " (prefix ++ "Running" :: cmd :: args))
+        (String.join " " (prefix ++ "Ran    " :: cmd :: args))
+        task
+
+
+{-| -}
+execLog : List String -> String -> List String -> BackendTask FatalError ()
+execLog prefix cmd args =
+    logCommand prefix cmd args (Script.exec cmd args)

@@ -100,7 +100,7 @@ task config =
         let
             expected : Set String
             expected =
-                combined.dependencies
+                combined.intermediate
                     |> List.map Path.toString
                     |> Set.fromList
 
