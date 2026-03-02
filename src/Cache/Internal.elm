@@ -78,120 +78,20 @@ derive {- description -} target inner =
                     tmp =
                         hashToTmp target
                 in
-                Do.exec "rm" [ "-rf", hashToPath buildPath tmp ] <|
-                    \_ ->
-                        Do.do
-                            (inner input_ tmp
-                                |> BackendTask.onError
-                                    (\e ->
-                                        Do.exec "rm" [ "-rf", hashToPath buildPath tmp ] <|
-                                            \_ ->
-                                                BackendTask.fail e
-                                    )
+                Do.exec "rm" [ "-rf", hashToPath buildPath tmp ] <| \_ ->
+                Do.do
+                    (inner input_ tmp
+                        |> BackendTask.onError
+                            (\e ->
+                                Do.exec "rm" [ "-rf", hashToPath buildPath tmp ] <| \_ ->
+                                BackendTask.fail e
                             )
-                        <|
-                            \_ ->
-                                Do.exec "mv" [ hashToPath buildPath tmp, hashToPath buildPath target ] <|
-                                    \_ ->
-                                        Do.exec "chmod" [ "-R", "a=rX", hashToPath buildPath target ] <|
-                                            \_ ->
-                                                BackendTask.succeed ( target, newDeps )
+                    )
+                <| \_ ->
+                Do.exec "mv" [ hashToPath buildPath tmp, hashToPath buildPath target ] <| \_ ->
+                Do.exec "chmod" [ "-R", "a=rX", hashToPath buildPath target ] <| \_ ->
+                BackendTask.succeed ( target, newDeps )
         )
-
-
-
-------------
--- HASHES --
-------------
-
-
-{-| -}
-type Hash
-    = Hash String
-
-
-{-| Build an hashed file from the output of shaXsum/b3sum.
--}
-inputHash : String -> Result String Hash
-inputHash raw =
-    let
-        clean : String
-        clean =
-            String.left 8 raw
-    in
-    Hex.fromString clean
-        |> Result.map (\_ -> Hash clean)
-
-
-hashToPath : Path -> Hash -> String
-hashToPath buildPath (Hash hash) =
-    Path.toString buildPath ++ "/" ++ hash
-
-
-hashToString : Hash -> String
-hashToString (Hash hash) =
-    hash
-
-
-hashToTmp : Hash -> Hash
-hashToTmp (Hash hash) =
-    Hash ("tmp-" ++ hash)
-
-
-hashToWorkspace : Hash -> Hash
-hashToWorkspace (Hash hash) =
-    Hash ("workspace-" ++ hash)
-
-
-extendHashWith : List String -> Hash -> Hash
-extendHashWith l (Hash r) =
-    stringToHash (String.join "|" (r :: l))
-
-
-stringToHash : String -> Hash
-stringToHash raw =
-    raw
-        |> FNV1a.hash
-        |> Hex.toString
-        |> String.padLeft 8 '0'
-        |> Hash
-
-
-type HashSet
-    = HashSet (BST String)
-
-
-hashSetEmpty : HashSet
-hashSetEmpty =
-    HashSet BST.empty
-
-
-hashSetMember : Hash -> HashSet -> Bool
-hashSetMember (Hash x) (HashSet s) =
-    BST.member x s
-
-
-hashSetInsert : Hash -> HashSet -> HashSet
-hashSetInsert (Hash x) (HashSet s) =
-    HashSet (BST.insert x s)
-
-
-hashSetUnion : HashSet -> HashSet -> HashSet
-hashSetUnion (HashSet a) (HashSet b) =
-    HashSet (BST.union a b)
-
-
-hashSetToList : HashSet -> List Hash
-hashSetToList (HashSet s) =
-    BST.toList s
-        |> List.map Hash
-
-
-hashSetFromList : List String -> HashSet
-hashSetFromList list =
-    list
-        |> BST.fromList
-        |> HashSet
 
 
 debug : Bool
@@ -310,35 +210,33 @@ withFile : Hash -> (String -> Monad a) -> Monad a
 withFile hash f =
     Monad "withFile"
         (\({ buildPath } as input_) deps ->
-            Do.allowFatal (File.rawFile (hashToPath buildPath hash)) <|
-                \raw ->
-                    runMonad (f raw) input_ (hashSetInsert hash deps)
+            Do.allowFatal (File.rawFile (hashToPath buildPath hash)) <| \raw ->
+            runMonad (f raw) input_ (hashSetInsert hash deps)
         )
 
 
 run : { jobs : Maybe Int } -> Path -> Monad Hash -> BackendTask FatalError { output : Path, intermediate : List Path }
 run config buildPath m =
-    Do.do (listExisting buildPath) <|
-        \existing ->
-            let
-                input_ : Input
-                input_ =
-                    { existing = existing
-                    , prefix = []
-                    , buildPath = buildPath
-                    , jobs = config.jobs
-                    }
-            in
-            runMonad m input_ hashSetEmpty
-                |> BackendTask.map
-                    (\( output, deps ) ->
-                        { output = Path.path (hashToPath buildPath output)
-                        , intermediate =
-                            deps
-                                |> hashSetToList
-                                |> List.map (\raw -> raw |> hashToPath buildPath |> Path.path)
-                        }
-                    )
+    Do.do (listExisting buildPath) <| \existing ->
+    let
+        input_ : Input
+        input_ =
+            { existing = existing
+            , prefix = []
+            , buildPath = buildPath
+            , jobs = config.jobs
+            }
+    in
+    runMonad m input_ hashSetEmpty
+        |> BackendTask.map
+            (\( output, deps ) ->
+                { output = Path.path (hashToPath buildPath output)
+                , intermediate =
+                    deps
+                        |> hashSetToList
+                        |> List.map (\raw -> raw |> hashToPath buildPath |> Path.path)
+                }
+            )
 
 
 listExisting : Path -> BackendTask FatalError HashSet
@@ -415,29 +313,28 @@ jobs =
             -> (() -> BackendTask FatalError Int)
             -> BackendTask FatalError Int
         tryRunningOrElse cmd args orElse =
-            Do.do (Script.command cmd args |> BackendTask.toResult) <|
-                \nprocResult ->
-                    case nprocResult of
-                        Ok output ->
+            Do.do (Script.command cmd args |> BackendTask.toResult) <| \nprocResult ->
+            case nprocResult of
+                Ok output ->
+                    let
+                        trimmed : String
+                        trimmed =
+                            String.trim output
+                    in
+                    case String.toInt trimmed of
+                        Nothing ->
                             let
-                                trimmed : String
-                                trimmed =
-                                    String.trim output
+                                message : String
+                                message =
+                                    "Invalid " ++ String.join " " (cmd :: args) ++ " output: " ++ Json.Encode.encode 0 (Json.Encode.string trimmed)
                             in
-                            case String.toInt trimmed of
-                                Nothing ->
-                                    let
-                                        message : String
-                                        message =
-                                            "Invalid " ++ String.join " " (cmd :: args) ++ " output: " ++ Json.Encode.encode 0 (Json.Encode.string trimmed)
-                                    in
-                                    BackendTask.fail (FatalError.fromString message)
+                            BackendTask.fail (FatalError.fromString message)
 
-                                Just j ->
-                                    BackendTask.succeed j
+                        Just j ->
+                            BackendTask.succeed j
 
-                        Err _ ->
-                            orElse ()
+                Err _ ->
+                    orElse ()
     in
     Monad "jobs"
         (\input_ deps ->
@@ -449,16 +346,14 @@ jobs =
                             BackendTask.succeed j
 
                         Nothing ->
-                            tryRunningOrElse "nproc" [ "--all" ] <|
-                                \_ ->
-                                    tryRunningOrElse "sysctl" [ "-n", "hw.logicalcpu" ] <|
-                                        \_ ->
-                                            let
-                                                message : String
-                                                message =
-                                                    "Failed to run either `nproc --all` or `sysctl -n hw.logicalcpu`. You can work around this by specifying an explicit number of jobs to run in parallel"
-                                            in
-                                            BackendTask.fail (FatalError.fromString message)
+                            tryRunningOrElse "nproc" [ "--all" ] <| \_ ->
+                            tryRunningOrElse "sysctl" [ "-n", "hw.logicalcpu" ] <| \_ ->
+                            let
+                                message : String
+                                message =
+                                    "Failed to run either `nproc --all` or `sysctl -n hw.logicalcpu`. You can work around this by specifying an explicit number of jobs to run in parallel"
+                            in
+                            BackendTask.fail (FatalError.fromString message)
             in
             task |> BackendTask.map (\j -> ( j, deps ))
         )
@@ -492,20 +387,18 @@ input : Path -> Monad Hash
 input inputPath =
     Monad "input"
         (\{ prefix } deps ->
-            Do.do (commandLog prefix "b3sum" [ Path.toString inputPath ]) <|
-                \body ->
-                    case inputHash body of
-                        Err e ->
-                            BackendTask.fail (FatalError.fromString e)
+            Do.do (commandLog prefix "b3sum" [ Path.toString inputPath ]) <| \body ->
+            case inputHash body of
+                Err e ->
+                    BackendTask.fail (FatalError.fromString e)
 
-                        Ok hash ->
-                            BackendTask.succeed ( hash, deps )
+                Ok hash ->
+                    BackendTask.succeed ( hash, deps )
         )
         |> andThen
             (\hash ->
-                derive {- "input" -} hash <|
-                    \{ prefix, buildPath } target ->
-                        execLog prefix "cp" [ Path.toString inputPath, hashToPath buildPath target ]
+                derive {- "input" -} hash <| \{ prefix, buildPath } target ->
+                execLog prefix "cp" [ Path.toString inputPath, hashToPath buildPath target ]
             )
 
 
@@ -538,3 +431,98 @@ logCommand prefix cmd args task =
 execLog : List String -> String -> List String -> BackendTask FatalError ()
 execLog prefix cmd args =
     logCommand prefix cmd args (Script.exec cmd args)
+
+
+
+------------
+-- HASHES --
+------------
+
+
+{-| -}
+type Hash
+    = Hash String
+
+
+{-| Build an hashed file from the output of shaXsum/b3sum.
+-}
+inputHash : String -> Result String Hash
+inputHash raw =
+    let
+        clean : String
+        clean =
+            String.left 8 raw
+    in
+    Hex.fromString clean
+        |> Result.map (\_ -> Hash clean)
+
+
+hashToPath : Path -> Hash -> String
+hashToPath buildPath (Hash hash) =
+    Path.toString buildPath ++ "/" ++ hash
+
+
+hashToString : Hash -> String
+hashToString (Hash hash) =
+    hash
+
+
+hashToTmp : Hash -> Hash
+hashToTmp (Hash hash) =
+    Hash ("tmp-" ++ hash)
+
+
+hashToWorkspace : Hash -> Hash
+hashToWorkspace (Hash hash) =
+    Hash ("workspace-" ++ hash)
+
+
+extendHashWith : List String -> Hash -> Hash
+extendHashWith l (Hash r) =
+    stringToHash (String.join "|" (r :: l))
+
+
+stringToHash : String -> Hash
+stringToHash raw =
+    raw
+        |> FNV1a.hash
+        |> Hex.toString
+        |> String.padLeft 8 '0'
+        |> Hash
+
+
+type HashSet
+    = HashSet (BST String)
+
+
+hashSetEmpty : HashSet
+hashSetEmpty =
+    HashSet BST.empty
+
+
+hashSetMember : Hash -> HashSet -> Bool
+hashSetMember (Hash x) (HashSet s) =
+    BST.member x s
+
+
+hashSetInsert : Hash -> HashSet -> HashSet
+hashSetInsert (Hash x) (HashSet s) =
+    HashSet (BST.insert x s)
+
+
+hashSetUnion : HashSet -> HashSet -> HashSet
+hashSetUnion (HashSet a) (HashSet b) =
+    HashSet (BST.union a b)
+
+
+hashSetToList : HashSet -> List Hash
+hashSetToList (HashSet s) =
+    BST.toList s
+        |> List.map Hash
+
+
+hashSetFromList : List String -> HashSet
+hashSetFromList list =
+    list
+        |> BST.fromList
+        |> HashSet
