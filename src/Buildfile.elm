@@ -4,10 +4,11 @@ import BackendTask exposing (BackendTask)
 import BackendTask.Glob as Glob
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import BuildTask.Do as Do
-import BuildTask.ElmCodegen as ElmCodegen
+import BuildTask.Elm as Elm
 import BuildTask.Font as Font
 import BuildTask.Image as Image
-import BuildTask.Unsafe
+import BuildTask.Unsafe as Unsafe
+import BuildTask.Unsafe.Do as Do
 import Elm
 import Elm.Annotation
 import Elm.Arg
@@ -111,7 +112,7 @@ buildAction config inputs =
     in
     Do.map4 T4
         (imagesElmFile processedFiles)
-        (ElmCodegen.elmCodegen (fontsElmFile fontFiles))
+        (Elm.codegen (fontsElmFile fontFiles))
         (imagesSizesFile imageFiles)
         publicFolder
     <| \(T4 imagesElm fontsElm imageSizes public) ->
@@ -199,61 +200,81 @@ fontsElmFile files =
 
 imagesElmFile : List ProcessedFile -> BuildTask FileOrDirectory
 imagesElmFile =
-    BuildTask.Unsafe.named "imagesElmFile"
-        encodeProcessedFiles
-        (\processedFiles ->
-            let
-                file : Elm.File
-                file =
-                    processedFiles
-                        |> List.filterMap
-                            (\processedFile ->
-                                case processedFile of
-                                    ProcessedImage image ->
-                                        Just (processedImageToDeclaration image.original)
+    List.filterMap
+        (\processedFile ->
+            case processedFile of
+                ProcessedImage { original } ->
+                    Just
+                        { svg = False
+                        , filename = original.filename
+                        , hash = original.hash
+                        , width = original.width
+                        , height = original.height
+                        }
 
-                                    ProcessedSvg image ->
-                                        Just (processedSvgToDeclaration image)
+                ProcessedSvg original ->
+                    Just
+                        { svg = True
+                        , filename = original.filename
+                        , hash = original.hash
+                        , width = original.width
+                        , height = original.height
+                        }
 
-                                    _ ->
-                                        Nothing
-                            )
-                        |> (::) standardFormats.declaration
-                        |> (::) getSizes_.declaration
-                        |> (::) toSources.declaration
-                        |> (::) (toPicture.declaration |> Elm.expose)
-                        |> Elm.file [ "Images" ]
-            in
-            Do.writeFile file.contents <| \hash ->
-            BuildTask.pipeThrough "elm-format" [ "--stdin" ] hash
+                ProcessedCss _ ->
+                    Nothing
+
+                ProcessedFont _ ->
+                    Nothing
         )
+        >> Unsafe.named "imagesElmFile"
+            encodeProcessedFiles
+            (\processedFiles ->
+                let
+                    file : Elm.File
+                    file =
+                        processedFiles
+                            |> List.map
+                                (\processedFile ->
+                                    if processedFile.svg then
+                                        processedSvgToDeclaration processedFile
+
+                                    else
+                                        processedImageToDeclaration processedFile
+                                )
+                            |> (::) standardFormats.declaration
+                            |> (::) getSizes_.declaration
+                            |> (::) toSources.declaration
+                            |> (::) (toPicture.declaration |> Elm.expose)
+                            |> Elm.file [ "Images" ]
+                in
+                Do.writeFile file.contents <| \hash ->
+                Elm.format hash
+            )
 
 
-encodeProcessedFiles : List ProcessedFile -> { files : List FileOrDirectory, additionalData : List String }
+encodeProcessedFiles :
+    List
+        { svg : Bool
+        , filename : Path
+        , hash : FileOrDirectory
+        , width : Int
+        , height : Int
+        }
+    -> { files : List FileOrDirectory, additionalData : List String }
 encodeProcessedFiles processedFiles =
     let
         ( files, additionalData ) =
             processedFiles
-                |> List.map encodeProcessedFile
+                |> List.map
+                    (\{ filename, hash } ->
+                        -- CORRECTNESS: if svg, width or height change then hash
+                        -- will change too so we don't need to track them separately
+                        ( hash, Path.toString filename )
+                    )
                 |> List.unzip
     in
     { files = files, additionalData = additionalData }
-
-
-encodeProcessedFile : ProcessedFile -> ( FileOrDirectory, String )
-encodeProcessedFile processedFile =
-    case processedFile of
-        ProcessedImage { original } ->
-            ( original.hash, Path.toString original.filename )
-
-        ProcessedCss original ->
-            ( original.hash, Path.toString original.filename )
-
-        ProcessedSvg original ->
-            ( original.hash, Path.toString original.filename )
-
-        ProcessedFont original ->
-            ( original.hash, Path.toString original.filename )
 
 
 processedFileToFileList : ProcessedFile -> List { filename : Path, hash : FileOrDirectory }
@@ -362,7 +383,7 @@ processFile config total index ( path, copyFile ) =
                         BuildTask.succeed converted
 
                      else
-                        BuildTask.pipeThrough "magick" [ "-", "-resize", String.fromInt w ++ "x" ++ String.fromInt sizeData.height, "-" ] converted
+                        Unsafe.pipeThrough "magick" [ "-", "-resize", String.fromInt w ++ "x" ++ String.fromInt sizeData.height, "-" ] converted
                     )
                         |> BuildTask.map
                             (\resized ->
@@ -548,7 +569,7 @@ standardFormats =
 
 
 processedImageToDeclaration :
-    HashedFileWith { width : Int, height : Int }
+    HashedFileWith { a | width : Int, height : Int }
     -> Elm.Declaration
 processedImageToDeclaration original =
     let
@@ -596,7 +617,7 @@ processedImageToDeclaration original =
 
 
 processedSvgToDeclaration :
-    HashedFileWith { width : Int, height : Int }
+    HashedFileWith { a | width : Int, height : Int }
     -> Elm.Declaration
 processedSvgToDeclaration original =
     let

@@ -2,6 +2,7 @@ module BuildTask.Image exposing (getSize, getSvgSize, stripMetadata)
 
 import Ansi.Color
 import BuildTask exposing (BuildTask, FileOrDirectory)
+import BuildTask.Unsafe
 import Parser exposing ((|.), (|=), Parser)
 import Parser.Error
 import Parser.Workaround
@@ -69,9 +70,9 @@ errorToString src deadEnds =
 
 stripMetadata : FileOrDirectory -> BuildTask FileOrDirectory
 stripMetadata hash =
-    BuildTask.pipeThrough "exiftool" [ "-all=", "-", "-o", "-" ] hash
+    BuildTask.Unsafe.pipeThrough "exiftool" [ "-all=", "-", "-o", "-" ] hash
 
 
 getSize : FileOrDirectory -> BuildTask FileOrDirectory
 getSize file =
-    BuildTask.pipeThrough "identify" [ "-ping", "-format", "%w %h", "-" ] file
+    BuildTask.Unsafe.pipeThrough "identify" [ "-ping", "-format", "%w %h", "-" ] file

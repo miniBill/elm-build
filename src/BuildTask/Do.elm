@@ -1,4 +1,4 @@
-module BuildTask.Do exposing (andThen, commandWithFile, each, jobs, map, map2, map3, map4, pipeThrough, withFile, writeFile)
+module BuildTask.Do exposing (andThen, each, jobs, map, map2, map3, map4, withFile, writeFile)
 
 import BuildTask exposing (BuildTask, FileOrDirectory)
 
@@ -50,16 +50,6 @@ map4 f a b c d k =
     BuildTask.map4 f a b c d |> andThen k
 
 
-pipeThrough :
-    String
-    -> List String
-    -> FileOrDirectory
-    -> (FileOrDirectory -> BuildTask a)
-    -> BuildTask a
-pipeThrough cmd args hash k =
-    BuildTask.pipeThrough cmd args hash |> andThen k
-
-
 writeFile :
     String
     -> (FileOrDirectory -> BuildTask a)
@@ -81,13 +71,3 @@ withFile hash f k =
 each : List a -> (a -> BuildTask b) -> (List b -> BuildTask c) -> BuildTask c
 each l f k =
     BuildTask.each l f |> andThen k
-
-
-commandWithFile :
-    String
-    -> List String
-    -> FileOrDirectory
-    -> (FileOrDirectory -> BuildTask a)
-    -> BuildTask a
-commandWithFile cmd args hash k =
-    BuildTask.commandWithFile cmd args hash |> andThen k
