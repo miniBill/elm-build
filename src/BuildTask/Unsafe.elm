@@ -1,9 +1,14 @@
-module BuildTask.Unsafe exposing (named)
+module BuildTask.Unsafe exposing (commandInReadonlyDirectory, commandInWritableDirectory, commandWithFile, named, pipeThrough)
 
 {-| -}
 
+import BackendTask
+import BackendTask.Do as Do
+import BackendTask.Extra
+import BackendTask.Stream as Stream
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import BuildTask.Internal as Internal
+import Pages.Script as Script
 
 
 {-| Defines a named step. This function is useful to define steps where a computation is expensive,
@@ -39,3 +44,134 @@ This approach is inspired by [noredink/elm-review-html-lazy](https://package.elm
 named : String -> (a -> { files : List FileOrDirectory, additionalData : List String }) -> (a -> BuildTask FileOrDirectory) -> a -> BuildTask FileOrDirectory
 named name toString action param =
     Internal.named name toString action param
+
+
+{-| Pipe a file through a command.
+
+**CORRECTNESS:**
+The command must be deterministic. The same input should correspond to the same output.
+
+In particular, the command must not:
+
+  - get data from the internet,
+  - read other files,
+  - use the current time,
+  - use any other source of randomness.
+
+-}
+pipeThrough : String -> List String -> FileOrDirectory -> BuildTask FileOrDirectory
+pipeThrough cmd args hash =
+    let
+        outputHash : FileOrDirectory
+        outputHash =
+            Internal.extendHashWith (cmd :: args) hash
+    in
+    Internal.derive {- (String.join " " ("pipeThrough" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
+    BackendTask.Extra.timed
+        (String.join " " (prefix ++ "Piping" :: Internal.hashToPath buildPath hash :: "through" :: cmd :: args))
+        (String.join " " (prefix ++ "Piped " :: Internal.hashToPath buildPath hash :: "through" :: cmd :: args))
+        (Stream.fileRead (Internal.hashToPath buildPath hash)
+            |> Stream.pipe (Stream.command cmd args)
+            |> Stream.pipe (Stream.fileWrite (Internal.hashToPath buildPath target))
+            |> Stream.run
+        )
+
+
+{-| Run a command in a specific generated directory and save the result to a file.
+
+To avoid needing to copy files, the directory will be read-only. If you need a writable directory use `commandInWritableDirectory` instead. Only stdout is captured and cached.
+
+**CORRECTNESS:**
+The command must be deterministic. The same input should correspond to the same output.
+
+In particular, the command must not:
+
+  - get data from the internet,
+  - read other files,
+  - use the current time,
+  - use any other source of randomness.
+
+-}
+commandInReadonlyDirectory : String -> List String -> FileOrDirectory -> BuildTask FileOrDirectory
+commandInReadonlyDirectory cmd args hash =
+    let
+        outputHash : FileOrDirectory
+        outputHash =
+            Internal.extendHashWith (cmd :: args) hash
+    in
+    Internal.derive {- (String.join " " ("commandInReadonlyDirectory" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
+    Do.do (Internal.commandLog prefix cmd args |> BackendTask.inDir (Internal.hashToPath buildPath hash)) <| \output ->
+    BackendTask.allowFatal (Script.writeFile { path = Internal.hashToPath buildPath target, body = output })
+
+
+{-| Run a command in a writable temporary directory seeded from a cached directory.
+
+Unlike `commandInReadonlyDirectory` (which runs in the read-only cached directory directly),
+this creates a writable copy so the command can create temporary files
+(like `elm-stuff/` during compilation). Only stdout is captured and cached;
+the temporary directory is discarded after the command completes.
+
+**CORRECTNESS:**
+The command must be deterministic. The same input should correspond to the same output.
+
+In particular, the command must not:
+
+  - get data from the internet,
+  - read other files,
+  - use the current time,
+  - use any other source of randomness.
+
+-}
+commandInWritableDirectory : String -> List String -> FileOrDirectory -> BuildTask FileOrDirectory
+commandInWritableDirectory cmd args hash =
+    let
+        outputHash : FileOrDirectory
+        outputHash =
+            Internal.extendHashWith (cmd :: args) hash
+    in
+    Internal.derive outputHash <| \{ prefix, buildPath } target ->
+    let
+        workspacePath : String
+        workspacePath =
+            Internal.hashToPath buildPath (Internal.hashToWorkspace target)
+    in
+    Do.exec "rm" [ "-rf", workspacePath ] <| \_ ->
+    Do.exec "cp" [ "-r", Internal.hashToPath buildPath hash, workspacePath ] <| \_ ->
+    Do.exec "chmod" [ "-R", "u+w", workspacePath ] <| \_ ->
+    Do.do
+        (Internal.commandLog prefix cmd args
+            |> BackendTask.inDir workspacePath
+            |> BackendTask.Extra.finally
+                (Script.exec "rm" [ "-rf", workspacePath ])
+        )
+    <| \output ->
+    BackendTask.allowFatal (Script.writeFile { path = Internal.hashToPath buildPath target, body = output })
+
+
+{-| Run a command passing in a file (or directory) as last argument and save the result to a file.
+
+**CORRECTNESS:**
+The command must be deterministic. The same input should correspond to the same output.
+
+In particular, the command must not:
+
+  - get data from the internet,
+  - read other files,
+  - use the current time,
+  - use any other source of randomness.
+
+-}
+commandWithFile :
+    String
+    -> List String
+    -> FileOrDirectory
+    -> BuildTask FileOrDirectory
+commandWithFile cmd args hash =
+    let
+        outputHash : FileOrDirectory
+        outputHash =
+            Internal.extendHashWith (cmd :: args) hash
+    in
+    Internal.derive {- (String.join " " ("commandWithFile" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
+    Do.do (Internal.commandLog prefix cmd (args ++ [ Internal.hashToPath buildPath hash ])) <| \output ->
+    BackendTask.allowFatal (Script.writeFile { path = Internal.hashToPath buildPath target, body = output })

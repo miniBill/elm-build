@@ -3,7 +3,7 @@ module BuildTask exposing
     , do, succeed, fail
     , writeFile, run
     , map, map2, map3, map4, andThen, combine, combineBy, each, sequence
-    , pipeThrough, commandWithFile, commandInReadonlyDirectory, commandInWritableDirectory, withFile
+    , withFile
     , withPrefix, timed
     , jobs, triggerDebugger
     , BuildTask
@@ -34,7 +34,7 @@ module BuildTask exposing
 
 ## Operations
 
-@docs pipeThrough, commandWithFile, commandInReadonlyDirectory, commandInWritableDirectory, withFile
+@docs commandWithFile, commandInReadonlyDirectory, commandInWritableDirectory, withFile
 
 
 ## Output control
@@ -51,7 +51,6 @@ module BuildTask exposing
 import BackendTask exposing (BackendTask)
 import BackendTask.Do as Do
 import BackendTask.Extra
-import BackendTask.Stream as Stream
 import BuildTask.Internal as Internal
 import FastDict as Dict exposing (Dict)
 import FatalError exposing (FatalError)
@@ -150,6 +149,7 @@ inputs :
                 )
             )
 inputs inputPaths =
+    -- TODO: copy the files inside the build path _before_ hashing
     Do.do (Internal.commandLog [] "b3sum" (List.map Path.toString inputPaths)) <| \body ->
     List.map2
         (\inputPath line ->
@@ -266,111 +266,6 @@ combineTree (Tree tree) =
     combined
         |> Dict.foldl (\outputFilename hash acc -> Internal.execLog prefix "cp" [ "-rl", Internal.hashToPath buildPath hash, Internal.hashToPath buildPath target ++ "/" ++ outputFilename ] :: acc) []
         |> BackendTask.Extra.combineBy_ parallelism
-
-
-{-| -}
-pipeThrough : String -> List String -> FileOrDirectory -> BuildTask FileOrDirectory
-pipeThrough cmd args hash =
-    let
-        outputHash : FileOrDirectory
-        outputHash =
-            Internal.extendHashWith (cmd :: args) hash
-    in
-    Internal.derive {- (String.join " " ("pipeThrough" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
-    BackendTask.Extra.timed
-        (String.join " " (prefix ++ "Piping" :: Internal.hashToPath buildPath hash :: "through" :: cmd :: args))
-        (String.join " " (prefix ++ "Piped " :: Internal.hashToPath buildPath hash :: "through" :: cmd :: args))
-        (Stream.fileRead (Internal.hashToPath buildPath hash)
-            |> Stream.pipe (Stream.command cmd args)
-            |> Stream.pipe (Stream.fileWrite (Internal.hashToPath buildPath target))
-            |> Stream.run
-        )
-
-
-{-| Run a command in a specific generated directory and save the result to a file.
-
-To avoid needing to copy files, the directory will be read-only. If you need a writable directory use `commandInWritableDirectory` instead.
-
-This models commands as pure functions: given the same directory contents and
-arguments, the command produces the same stdout. The temporary directory handles the
-implementation detail that many tools need to write intermediate files.
-
-**IMPORTANT**: The command should only read files from that directory,
-otherwise elm-build has no way to know when to re-run it.
-
--}
-commandInReadonlyDirectory : String -> List String -> FileOrDirectory -> BuildTask FileOrDirectory
-commandInReadonlyDirectory cmd args hash =
-    let
-        outputHash : FileOrDirectory
-        outputHash =
-            Internal.extendHashWith (cmd :: args) hash
-    in
-    Internal.derive {- (String.join " " ("commandInReadonlyDirectory" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
-    Do.do (Internal.commandLog prefix cmd args |> BackendTask.inDir (Internal.hashToPath buildPath hash)) <| \output ->
-    BackendTask.allowFatal (Script.writeFile { path = Internal.hashToPath buildPath target, body = output })
-
-
-{-| Run a command in a writable temporary directory seeded from a cached directory.
-
-Unlike `commandInReadonlyDirectory` (which runs in the read-only cached directory directly),
-this creates a writable copy so the command can create temporary files
-(like `elm-stuff/` during compilation). Only stdout is captured and cached;
-the temporary directory is discarded after the command completes.
-
-This models commands as pure functions: given the same directory contents and
-arguments, the command produces the same stdout. The temporary directory handles the
-implementation detail that many tools need to write intermediate files.
-
-**IMPORTANT**: The command should only read files from the temporary directory,
-otherwise elm-build has no way to know when to re-run it.
-
--}
-commandInWritableDirectory : String -> List String -> FileOrDirectory -> BuildTask FileOrDirectory
-commandInWritableDirectory cmd args hash =
-    let
-        outputHash : FileOrDirectory
-        outputHash =
-            Internal.extendHashWith (cmd :: args) hash
-    in
-    Internal.derive outputHash <| \{ prefix, buildPath } target ->
-    let
-        workspacePath : String
-        workspacePath =
-            Internal.hashToPath buildPath (Internal.hashToWorkspace target)
-    in
-    Do.exec "rm" [ "-rf", workspacePath ] <| \_ ->
-    Do.exec "cp" [ "-r", Internal.hashToPath buildPath hash, workspacePath ] <| \_ ->
-    Do.exec "chmod" [ "-R", "u+w", workspacePath ] <| \_ ->
-    Do.do
-        (Internal.commandLog prefix cmd args
-            |> BackendTask.inDir workspacePath
-            |> BackendTask.Extra.finally
-                (Script.exec "rm" [ "-rf", workspacePath ])
-        )
-    <| \output ->
-    BackendTask.allowFatal (Script.writeFile { path = Internal.hashToPath buildPath target, body = output })
-
-
-{-| Run a command passing in a file (or directory) as last argument and save the result to a file.
-
-**IMPORTANT**: The command should only read that file or directory, otherwise elm-build has no way to know when to re-run it.
-
--}
-commandWithFile :
-    String
-    -> List String
-    -> FileOrDirectory
-    -> BuildTask FileOrDirectory
-commandWithFile cmd args hash =
-    let
-        outputHash : FileOrDirectory
-        outputHash =
-            Internal.extendHashWith (cmd :: args) hash
-    in
-    Internal.derive {- (String.join " " ("commandWithFile" :: cmd :: args)) -} outputHash <| \{ prefix, buildPath } target ->
-    Do.do (Internal.commandLog prefix cmd (args ++ [ Internal.hashToPath buildPath hash ])) <| \output ->
-    BackendTask.allowFatal (Script.writeFile { path = Internal.hashToPath buildPath target, body = output })
 
 
 {-| -}
