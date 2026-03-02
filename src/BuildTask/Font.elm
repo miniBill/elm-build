@@ -1,7 +1,7 @@
-module Cache.Font exposing (Data, Style(..), Weight(..), parse, styleToString, toCssFile, weightToNumber)
+module BuildTask.Font exposing (Data, Style(..), Weight(..), parse, styleToString, toCssFile, weightToNumber)
 
-import Cache exposing (FileOrDirectory)
-import Cache.Do as Do
+import BuildTask exposing (BuildTask, FileOrDirectory)
+import BuildTask.Do as Do
 import Path exposing (Path)
 import String.Multiline
 
@@ -79,26 +79,26 @@ weightToNumber weight =
             950
 
 
-parse : FileOrDirectory -> Cache.Monad Data
+parse : FileOrDirectory -> BuildTask Data
 parse hash =
     let
-        readFontData : String -> Cache.Monad Data
+        readFontData : String -> BuildTask Data
         readFontData familyAndStyle =
             case String.split " || " familyAndStyle of
                 [ family, styleAndWeight ] ->
                     case parseStyleAndWeight styleAndWeight of
                         Ok { style, weight } ->
                             { family = family, style = style, weight = weight }
-                                |> Cache.succeed
+                                |> BuildTask.succeed
 
                         Err e ->
-                            Cache.fail e
+                            BuildTask.fail e
 
                 _ ->
-                    Cache.fail ("Failed to parse family and style: " ++ familyAndStyle)
+                    BuildTask.fail ("Failed to parse family and style: " ++ familyAndStyle)
     in
     Do.commandWithFile "fc-scan" [ "--format", "%{family[0]} || %{style[0]}" ] hash <| \familyAndStyleFile ->
-    Cache.withFile familyAndStyleFile readFontData
+    BuildTask.withFile familyAndStyleFile readFontData
 
 
 parseStyleAndWeight : String -> Result String { style : Style, weight : Weight }

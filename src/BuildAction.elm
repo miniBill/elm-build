@@ -2,11 +2,11 @@ module BuildAction exposing (buildAction, getInputs)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Glob as Glob
-import Cache exposing (FileOrDirectory)
-import Cache.Do as Do
-import Cache.ElmCodegen as ElmCodegen
-import Cache.Font as Font
-import Cache.Image as Image
+import BuildTask exposing (BuildTask, FileOrDirectory)
+import BuildTask.Do as Do
+import BuildTask.ElmCodegen as ElmCodegen
+import BuildTask.Font as Font
+import BuildTask.Image as Image
 import Elm
 import Elm.Annotation
 import Elm.Arg
@@ -45,7 +45,7 @@ type alias HashedFileWith a =
     }
 
 
-getInputs : { a | inputDirectory : Path } -> BackendTask FatalError (List ( Path, Cache.Monad FileOrDirectory ))
+getInputs : { a | inputDirectory : Path } -> BackendTask FatalError (List ( Path, BuildTask FileOrDirectory ))
 getInputs config =
     Glob.fromStringWithOptions
         (let
@@ -61,7 +61,7 @@ getInputs config =
                 found
                     |> List.sort
                     |> List.map Path.path
-                    |> Cache.inputs
+                    |> BuildTask.inputs
             )
 
 
@@ -69,19 +69,19 @@ type T4 a b c d
     = T4 a b c d
 
 
-buildAction : { config | inputDirectory : Path } -> List ( Path, Cache.Monad FileOrDirectory ) -> Cache.Monad FileOrDirectory
+buildAction : { config | inputDirectory : Path } -> List ( Path, BuildTask FileOrDirectory ) -> BuildTask FileOrDirectory
 buildAction config inputs =
     let
         inputSize : Int
         inputSize =
             List.length inputs
     in
-    Cache.do
+    BuildTask.do
         (Do.jobs <| \parallelism ->
         inputs
             |> List.indexedMap (processFile config inputSize)
-            |> Cache.combineBy parallelism
-            |> Cache.map Maybe.Extra.values
+            |> BuildTask.combineBy parallelism
+            |> BuildTask.map Maybe.Extra.values
         )
     <| \processedFiles ->
     let
@@ -97,7 +97,7 @@ buildAction config inputs =
         imageFiles =
             List.filterMap asImage processedFiles
 
-        publicFolder : Cache.Monad FileOrDirectory
+        publicFolder : BuildTask FileOrDirectory
         publicFolder =
             Do.writeFile (Font.toCssFile fontFiles) <| \fontsCssHash ->
             ({ filename = Path.path "fonts.css"
@@ -105,8 +105,8 @@ buildAction config inputs =
              }
                 :: List.concatMap processedFileToFileList processedFiles
             )
-                |> Cache.combine
-                |> Cache.withPrefix ("[" ++ String.fromInt inputSize ++ "/" ++ String.fromInt inputSize ++ "]")
+                |> BuildTask.combine
+                |> BuildTask.withPrefix ("[" ++ String.fromInt inputSize ++ "/" ++ String.fromInt inputSize ++ "]")
     in
     Do.map4 T4
         (ElmCodegen.elmCodegen (imagesElmFile processedFiles))
@@ -114,7 +114,7 @@ buildAction config inputs =
         (imagesSizesFile imageFiles)
         publicFolder
     <| \(T4 imagesElm fontsElm imageSizes public) ->
-    Cache.combine
+    BuildTask.combine
         [ imagesElm
         , fontsElm
         , { filename = Path.path "image-sizes", hash = imageSizes }
@@ -159,7 +159,7 @@ imagesSizesFile :
         { a
             | original : HashedFileWith { width : Int, height : Int }
         }
-    -> Cache.Monad FileOrDirectory
+    -> BuildTask FileOrDirectory
 imagesSizesFile processedFiles =
     let
         content : String
@@ -181,7 +181,7 @@ imagesSizesFile processedFiles =
                     )
                 |> String.join "\n"
     in
-    Cache.writeFile content
+    BuildTask.writeFile content
 
 
 fontsElmFile : List (HashedFileWith Font.Data) -> Elm.File
@@ -242,7 +242,7 @@ processedFileToFileList file =
             [ extract data ]
 
 
-processFile : { config | inputDirectory : Path } -> Int -> Int -> ( Path, Cache.Monad FileOrDirectory ) -> Cache.Monad (Maybe ProcessedFile)
+processFile : { config | inputDirectory : Path } -> Int -> Int -> ( Path, BuildTask FileOrDirectory ) -> BuildTask (Maybe ProcessedFile)
 processFile config total index ( path, copyFile ) =
     let
         relative : Path
@@ -258,14 +258,14 @@ processFile config total index ( path, copyFile ) =
                 ++ String.fromInt total
                 ++ "]"
 
-        image : String -> Cache.Monad (Maybe ProcessedFile)
+        image : String -> BuildTask (Maybe ProcessedFile)
         image originalExtension =
-            Cache.do copyFile <| \copied ->
-            Cache.do (Image.stripMetadata copied) <| \stripped ->
-            Cache.do (Image.getSize stripped) <| \sizeFile ->
+            BuildTask.do copyFile <| \copied ->
+            BuildTask.do (Image.stripMetadata copied) <| \stripped ->
+            BuildTask.do (Image.getSize stripped) <| \sizeFile ->
             Do.withFile sizeFile parseSizeFile <| \sizeData ->
             Do.each standardFormats.list (convertAndResize ( stripped, originalExtension ) sizeData) <| \converted ->
-            Cache.succeed
+            BuildTask.succeed
                 ({ original =
                     { width = sizeData.width
                     , height = sizeData.height
@@ -278,7 +278,7 @@ processFile config total index ( path, copyFile ) =
                     |> Just
                 )
 
-        parseSizeFile : String -> Cache.Monad { width : Int, height : Int, sizes : List Int }
+        parseSizeFile : String -> BuildTask { width : Int, height : Int, sizes : List Int }
         parseSizeFile sizeString =
             case String.split " " sizeString |> List.map String.toInt of
                 [ Just width, Just height ] ->
@@ -287,7 +287,7 @@ processFile config total index ( path, copyFile ) =
                         sizes =
                             getSizes width
                     in
-                    Cache.succeed
+                    BuildTask.succeed
                         { width = width
                         , height = height
                         , sizes = sizes
@@ -299,7 +299,7 @@ processFile config total index ( path, copyFile ) =
                         msg =
                             "Could not parse size file: " ++ Json.Encode.encode 0 (Json.Encode.string sizeString)
                     in
-                    Cache.fail msg
+                    BuildTask.fail msg
 
         convertAndResize :
             ( FileOrDirectory, String )
@@ -309,7 +309,7 @@ processFile config total index ( path, copyFile ) =
                 , sizes : List Int
                 }
             -> { a | extension : String }
-            -> Cache.Monad (List (HashedFileWith { width : Int }))
+            -> BuildTask (List (HashedFileWith { width : Int }))
         convertAndResize ( stripped, originalExtension ) sizeData { extension } =
             let
                 convertedFilename : Path
@@ -318,15 +318,15 @@ processFile config total index ( path, copyFile ) =
             in
             convertTo extension ( stripped, originalExtension ) <| \converted ->
             let
-                doResize : Int -> Cache.Monad (HashedFileWith { width : Int })
+                doResize : Int -> BuildTask (HashedFileWith { width : Int })
                 doResize w =
                     (if w == sizeData.width then
-                        Cache.succeed converted
+                        BuildTask.succeed converted
 
                      else
-                        Cache.pipeThrough "magick" [ "-", "-resize", String.fromInt w ++ "x" ++ String.fromInt sizeData.height, "-" ] converted
+                        BuildTask.pipeThrough "magick" [ "-", "-resize", String.fromInt w ++ "x" ++ String.fromInt sizeData.height, "-" ] converted
                     )
-                        |> Cache.map
+                        |> BuildTask.map
                             (\resized ->
                                 { width = w
                                 , filename =
@@ -336,11 +336,11 @@ processFile config total index ( path, copyFile ) =
                                 }
                             )
             in
-            Cache.each sizeData.sizes doResize
+            BuildTask.each sizeData.sizes doResize
 
         font () =
-            Cache.do copyFile <| \hash ->
-            Cache.map
+            BuildTask.do copyFile <| \hash ->
+            BuildTask.map
                 (\fontData ->
                     Just
                         (ProcessedFont
@@ -374,9 +374,9 @@ processFile config total index ( path, copyFile ) =
             font ()
 
         Just "svg" ->
-            Cache.do copyFile <| \hash ->
-            Cache.do (Image.getSvgSize hash) <| \size ->
-            Cache.succeed
+            BuildTask.do copyFile <| \hash ->
+            BuildTask.do (Image.getSvgSize hash) <| \size ->
+            BuildTask.succeed
                 (Just
                     (ProcessedSvg
                         { filename = relative
@@ -389,28 +389,28 @@ processFile config total index ( path, copyFile ) =
 
         Just "zip" ->
             -- Ignore
-            Cache.succeed Nothing
+            BuildTask.succeed Nothing
 
         Just "txt" ->
             -- Ignore
-            Cache.succeed Nothing
+            BuildTask.succeed Nothing
 
         Just "md" ->
             -- Ignore
-            Cache.succeed Nothing
+            BuildTask.succeed Nothing
 
         Just "css" ->
-            Cache.do copyFile <| \hash ->
-            Cache.succeed (Just (ProcessedCss { filename = relative, hash = hash }))
+            BuildTask.do copyFile <| \hash ->
+            BuildTask.succeed (Just (ProcessedCss { filename = relative, hash = hash }))
 
         _ ->
             -- Cache.fail ("Don't know how to process " ++ Path.toString path)
-            Cache.succeed Nothing
+            BuildTask.succeed Nothing
     )
-        |> Cache.timed
+        |> BuildTask.timed
             ("Processing " ++ Path.toString path)
             ("Processed  " ++ Path.toString path)
-        |> Cache.withPrefix prefix
+        |> BuildTask.withPrefix prefix
 
 
 minSize : number
@@ -465,8 +465,8 @@ getSizes_ =
 convertTo :
     String
     -> ( FileOrDirectory, String )
-    -> (FileOrDirectory -> Cache.Monad a)
-    -> Cache.Monad a
+    -> (FileOrDirectory -> BuildTask a)
+    -> BuildTask a
 convertTo format ( cached, originalExtension ) k =
     if originalExtension == format then
         k cached

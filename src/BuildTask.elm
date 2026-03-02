@@ -1,11 +1,12 @@
-module Cache exposing
+module BuildTask exposing
     ( FileOrDirectory, input, inputs
-    , Monad, do, succeed, fail
+    , do, succeed, fail
     , writeFile, run
     , map, map2, map3, map4, andThen, combine, combineBy, each, sequence
     , pipeThrough, commandWithFile, commandInReadonlyDirectory, commandInWritableDirectory, withFile
     , withPrefix, timed
     , jobs, triggerDebugger
+    , BuildTask
     )
 
 {-|
@@ -51,7 +52,7 @@ import BackendTask exposing (BackendTask)
 import BackendTask.Do as Do
 import BackendTask.Extra
 import BackendTask.Stream as Stream
-import Cache.Internal as Internal exposing (Monad)
+import BuildTask.Internal as Internal
 import FastDict as Dict exposing (Dict)
 import FatalError exposing (FatalError)
 import Pages.Script as Script
@@ -60,8 +61,8 @@ import Result.Extra
 
 
 {-| -}
-type alias Monad a =
-    Internal.Monad a
+type alias BuildTask a =
+    Internal.BuildTask a
 
 
 type alias FileOrDirectory =
@@ -69,13 +70,13 @@ type alias FileOrDirectory =
 
 
 {-| -}
-succeed : a -> Monad a
+succeed : a -> BuildTask a
 succeed v =
     Internal.succeed v
 
 
 {-| -}
-map : (a -> b) -> Monad a -> Monad b
+map : (a -> b) -> BuildTask a -> BuildTask b
 map f m =
     Internal.map f m
 
@@ -83,9 +84,9 @@ map f m =
 {-| -}
 map2 :
     (a -> b -> c)
-    -> Monad a
-    -> Monad b
-    -> Monad c
+    -> BuildTask a
+    -> BuildTask b
+    -> BuildTask c
 map2 f a b =
     Internal.map2 f a b
 
@@ -93,10 +94,10 @@ map2 f a b =
 {-| -}
 map3 :
     (a -> b -> c -> d)
-    -> Monad a
-    -> Monad b
-    -> Monad c
-    -> Monad d
+    -> BuildTask a
+    -> BuildTask b
+    -> BuildTask c
+    -> BuildTask d
 map3 f a b c =
     Internal.map3 f a b c
 
@@ -104,35 +105,35 @@ map3 f a b c =
 {-| -}
 map4 :
     (a -> b -> c -> d -> e)
-    -> Monad a
-    -> Monad b
-    -> Monad c
-    -> Monad d
-    -> Monad e
+    -> BuildTask a
+    -> BuildTask b
+    -> BuildTask c
+    -> BuildTask d
+    -> BuildTask e
 map4 f a b c d =
     Internal.map4 f a b c d
 
 
 {-| -}
-andThen : (a -> Monad b) -> Monad a -> Monad b
+andThen : (a -> BuildTask b) -> BuildTask a -> BuildTask b
 andThen f m =
     Internal.andThen f m
 
 
 {-| -}
-fail : String -> Monad a
+fail : String -> BuildTask a
 fail msg =
     Internal.fail msg
 
 
 {-| -}
-triggerDebugger : Monad ()
+triggerDebugger : BuildTask ()
 triggerDebugger =
     Internal.triggerDebugger
 
 
 {-| -}
-input : Path -> Monad FileOrDirectory
+input : Path -> BuildTask FileOrDirectory
 input inputPath =
     Internal.input inputPath
 
@@ -145,7 +146,7 @@ inputs :
             FatalError
             (List
                 ( Path
-                , Monad FileOrDirectory
+                , BuildTask FileOrDirectory
                 )
             )
 inputs inputPaths =
@@ -177,7 +178,7 @@ type Tree
 
 
 {-| -}
-combine : List { filename : Path, hash : FileOrDirectory } -> Monad FileOrDirectory
+combine : List { filename : Path, hash : FileOrDirectory } -> BuildTask FileOrDirectory
 combine files =
     files
         |> buildTree
@@ -236,7 +237,7 @@ buildTree files =
     List.foldl addFile emptyTree files
 
 
-combineTree : Tree -> Monad FileOrDirectory
+combineTree : Tree -> BuildTask FileOrDirectory
 combineTree (Tree tree) =
     do jobs <| \parallelism ->
     do
@@ -268,7 +269,7 @@ combineTree (Tree tree) =
 
 
 {-| -}
-pipeThrough : String -> List String -> FileOrDirectory -> Monad FileOrDirectory
+pipeThrough : String -> List String -> FileOrDirectory -> BuildTask FileOrDirectory
 pipeThrough cmd args hash =
     let
         outputHash : FileOrDirectory
@@ -298,7 +299,7 @@ implementation detail that many tools need to write intermediate files.
 otherwise elm-build has no way to know when to re-run it.
 
 -}
-commandInReadonlyDirectory : String -> List String -> FileOrDirectory -> Monad FileOrDirectory
+commandInReadonlyDirectory : String -> List String -> FileOrDirectory -> BuildTask FileOrDirectory
 commandInReadonlyDirectory cmd args hash =
     let
         outputHash : FileOrDirectory
@@ -325,7 +326,7 @@ implementation detail that many tools need to write intermediate files.
 otherwise elm-build has no way to know when to re-run it.
 
 -}
-commandInWritableDirectory : String -> List String -> FileOrDirectory -> Monad FileOrDirectory
+commandInWritableDirectory : String -> List String -> FileOrDirectory -> BuildTask FileOrDirectory
 commandInWritableDirectory cmd args hash =
     let
         outputHash : FileOrDirectory
@@ -360,7 +361,7 @@ commandWithFile :
     String
     -> List String
     -> FileOrDirectory
-    -> Monad FileOrDirectory
+    -> BuildTask FileOrDirectory
 commandWithFile cmd args hash =
     let
         outputHash : FileOrDirectory
@@ -373,19 +374,19 @@ commandWithFile cmd args hash =
 
 
 {-| -}
-do : Monad b -> (b -> Monad a) -> Monad a
+do : BuildTask b -> (b -> BuildTask a) -> BuildTask a
 do x f =
     andThen f x
 
 
 {-| -}
-withFile : FileOrDirectory -> (String -> Monad a) -> Monad a
+withFile : FileOrDirectory -> (String -> BuildTask a) -> BuildTask a
 withFile hash f =
     Internal.withFile hash f
 
 
 {-| -}
-writeFile : String -> Monad FileOrDirectory
+writeFile : String -> BuildTask FileOrDirectory
 writeFile content =
     let
         hash : FileOrDirectory
@@ -397,41 +398,41 @@ writeFile content =
 
 
 {-| -}
-run : { jobs : Maybe Int } -> Path -> Monad FileOrDirectory -> BackendTask FatalError { output : Path, intermediate : List Path }
+run : { jobs : Maybe Int } -> Path -> BuildTask FileOrDirectory -> BackendTask FatalError { output : Path, intermediate : List Path }
 run config buildPath m =
     Internal.run config buildPath m
 
 
 {-| -}
-combineBy : Int -> List (Monad a) -> Monad (List a)
+combineBy : Int -> List (BuildTask a) -> BuildTask (List a)
 combineBy n ops =
     Internal.combineBy n ops
 
 
 {-| -}
-each : List a -> (a -> Monad b) -> Monad (List b)
+each : List a -> (a -> BuildTask b) -> BuildTask (List b)
 each l f =
     l |> List.map f |> sequence
 
 
 {-| -}
-sequence : List (Monad a) -> Monad (List a)
+sequence : List (BuildTask a) -> BuildTask (List a)
 sequence ops =
     Internal.sequence ops
 
 
 {-| -}
-timed : String -> String -> Monad a -> Monad a
+timed : String -> String -> BuildTask a -> BuildTask a
 timed before after task =
     Internal.timed before after task
 
 
 {-| -}
-withPrefix : String -> Monad a -> Monad a
+withPrefix : String -> BuildTask a -> BuildTask a
 withPrefix newPrefix m =
     Internal.withPrefix newPrefix m
 
 
-jobs : Monad Int
+jobs : BuildTask Int
 jobs =
     Internal.jobs

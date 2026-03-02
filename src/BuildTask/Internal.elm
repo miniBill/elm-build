@@ -1,4 +1,4 @@
-module Cache.Internal exposing (Hash, HashSet, Input, Monad(..), andThen, combineBy, commandLog, derive, execLog, extendHashWith, fail, hashToPath, hashToString, hashToWorkspace, input, inputHash, jobs, map, map2, map3, map4, named, run, sequence, stringToHash, succeed, timed, triggerDebugger, withFile, withPrefix)
+module BuildTask.Internal exposing (BuildTask(..), Hash, HashSet, Input, andThen, combineBy, commandLog, derive, execLog, extendHashWith, fail, hashToPath, hashToString, hashToWorkspace, input, inputHash, jobs, map, map2, map3, map4, named, run, sequence, stringToHash, succeed, timed, triggerDebugger, withFile, withPrefix)
 
 import BST exposing (BST)
 import BackendTask exposing (BackendTask)
@@ -16,8 +16,8 @@ import Pages.Script as Script
 import Path exposing (Path)
 
 
-type Monad a
-    = Monad
+type BuildTask a
+    = BuildTask
         String
         (Input
          -> HashSet -- deps
@@ -41,9 +41,9 @@ derive :
          -> Hash
          -> BackendTask FatalError ()
         )
-    -> Monad Hash
+    -> BuildTask Hash
 derive {- description -} target inner =
-    Monad "derive"
+    BuildTask "derive"
         (\({ existing, buildPath } as input_) deps ->
             let
                 newDeps : HashSet
@@ -99,8 +99,8 @@ debug =
     False
 
 
-runMonad : Monad a -> Input -> HashSet -> BackendTask FatalError ( a, HashSet )
-runMonad (Monad label m) input_ deps =
+runMonad : BuildTask a -> Input -> HashSet -> BackendTask FatalError ( a, HashSet )
+runMonad (BuildTask label m) input_ deps =
     if debug then
         m input_ deps
             |> BackendTask.andThen
@@ -117,9 +117,9 @@ runMonad (Monad label m) input_ deps =
 
 
 {-| -}
-map : (a -> b) -> Monad a -> Monad b
+map : (a -> b) -> BuildTask a -> BuildTask b
 map f m =
-    Monad "map"
+    BuildTask "map"
         (\input_ deps ->
             runMonad m input_ deps
                 |> BackendTask.map
@@ -132,11 +132,11 @@ map f m =
 {-| -}
 map2 :
     (a -> b -> c)
-    -> Monad a
-    -> Monad b
-    -> Monad c
+    -> BuildTask a
+    -> BuildTask b
+    -> BuildTask c
 map2 f a b =
-    Monad "map2"
+    BuildTask "map2"
         (\input_ deps ->
             BackendTask.map2
                 (\( va, depsA ) ( vb, depsB ) ->
@@ -150,12 +150,12 @@ map2 f a b =
 {-| -}
 map3 :
     (a -> b -> c -> d)
-    -> Monad a
-    -> Monad b
-    -> Monad c
-    -> Monad d
+    -> BuildTask a
+    -> BuildTask b
+    -> BuildTask c
+    -> BuildTask d
 map3 f a b c =
-    Monad "map3"
+    BuildTask "map3"
         (\input_ deps ->
             BackendTask.map3
                 (\( va, depsA ) ( vb, depsB ) ( vc, depsC ) ->
@@ -170,13 +170,13 @@ map3 f a b c =
 {-| -}
 map4 :
     (a -> b -> c -> d -> e)
-    -> Monad a
-    -> Monad b
-    -> Monad c
-    -> Monad d
-    -> Monad e
+    -> BuildTask a
+    -> BuildTask b
+    -> BuildTask c
+    -> BuildTask d
+    -> BuildTask e
 map4 f a b c d =
-    Monad "map4"
+    BuildTask "map4"
         (\input_ deps ->
             BackendTask.map4
                 (\( va, depsA ) ( vb, depsB ) ( vc, depsC ) ( vd, depsD ) ->
@@ -194,9 +194,9 @@ map4 f a b c d =
 
 
 {-| -}
-andThen : (a -> Monad b) -> Monad a -> Monad b
+andThen : (a -> BuildTask b) -> BuildTask a -> BuildTask b
 andThen f m =
-    Monad "andThen"
+    BuildTask "andThen"
         (\input_ deps ->
             runMonad m input_ deps
                 |> BackendTask.andThen
@@ -206,16 +206,16 @@ andThen f m =
         )
 
 
-withFile : Hash -> (String -> Monad a) -> Monad a
+withFile : Hash -> (String -> BuildTask a) -> BuildTask a
 withFile hash f =
-    Monad "withFile"
+    BuildTask "withFile"
         (\({ buildPath } as input_) deps ->
             Do.allowFatal (File.rawFile (hashToPath buildPath hash)) <| \raw ->
             runMonad (f raw) input_ (hashSetInsert hash deps)
         )
 
 
-run : { jobs : Maybe Int } -> Path -> Monad Hash -> BackendTask FatalError { output : Path, intermediate : List Path }
+run : { jobs : Maybe Int } -> Path -> BuildTask Hash -> BackendTask FatalError { output : Path, intermediate : List Path }
 run config buildPath m =
     Do.do (listExisting buildPath) <| \existing ->
     let
@@ -248,9 +248,9 @@ listExisting path =
         |> BackendTask.map hashSetFromList
 
 
-combineBy : Int -> List (Monad a) -> Monad (List a)
+combineBy : Int -> List (BuildTask a) -> BuildTask (List a)
 combineBy n ops =
-    Monad "combineBy"
+    BuildTask "combineBy"
         (\input_ deps ->
             case ops of
                 [] ->
@@ -274,9 +274,9 @@ combineBy n ops =
         )
 
 
-sequence : List (Monad a) -> Monad (List a)
+sequence : List (BuildTask a) -> BuildTask (List a)
 sequence ops =
-    Monad "sequence"
+    BuildTask "sequence"
         (\input_ deps ->
             if List.isEmpty ops then
                 BackendTask.succeed ( [], deps )
@@ -294,17 +294,17 @@ sequence ops =
         )
 
 
-timed : String -> String -> Monad a -> Monad a
+timed : String -> String -> BuildTask a -> BuildTask a
 timed before after task =
-    Monad "timed" (\input_ deps -> BackendTask.Extra.timed before after (runMonad task input_ deps))
+    BuildTask "timed" (\input_ deps -> BackendTask.Extra.timed before after (runMonad task input_ deps))
 
 
-withPrefix : String -> Monad a -> Monad a
+withPrefix : String -> BuildTask a -> BuildTask a
 withPrefix newPrefix m =
-    Monad "withPrefix" (\input_ deps -> runMonad m { input_ | prefix = newPrefix :: input_.prefix } deps)
+    BuildTask "withPrefix" (\input_ deps -> runMonad m { input_ | prefix = newPrefix :: input_.prefix } deps)
 
 
-jobs : Monad Int
+jobs : BuildTask Int
 jobs =
     let
         tryRunningOrElse :
@@ -336,7 +336,7 @@ jobs =
                 Err _ ->
                     orElse ()
     in
-    Monad "jobs"
+    BuildTask "jobs"
         (\input_ deps ->
             let
                 task : BackendTask FatalError Int
@@ -359,33 +359,33 @@ jobs =
         )
 
 
-succeed : a -> Monad a
+succeed : a -> BuildTask a
 succeed v =
-    Monad "succeed" (\_ deps -> BackendTask.succeed ( v, deps ))
+    BuildTask "succeed" (\_ deps -> BackendTask.succeed ( v, deps ))
 
 
-fail : String -> Monad a
+fail : String -> BuildTask a
 fail msg =
     triggerDebugger
         |> andThen
             (\_ ->
-                Monad "fail"
+                BuildTask "fail"
                     (\_ _ -> BackendTask.fail (FatalError.fromString msg))
             )
 
 
-triggerDebugger : Monad ()
+triggerDebugger : BuildTask ()
 triggerDebugger =
-    Monad "triggerDebugger"
+    BuildTask "triggerDebugger"
         (\_ deps ->
             BackendTask.Custom.run "triggerDebugger" Json.Encode.null (Json.Decode.succeed ( (), deps ))
                 |> BackendTask.allowFatal
         )
 
 
-input : Path -> Monad Hash
+input : Path -> BuildTask Hash
 input inputPath =
-    Monad "input"
+    BuildTask "input"
         (\{ prefix } deps ->
             Do.do (commandLog prefix "b3sum" [ Path.toString inputPath ]) <| \body ->
             case inputHash body of
@@ -528,7 +528,7 @@ hashSetFromList list =
         |> HashSet
 
 
-named : String -> (a -> String) -> (a -> Monad Hash) -> a -> Monad Hash
+named : String -> (a -> String) -> (a -> BuildTask Hash) -> a -> BuildTask Hash
 named name encode action param =
     let
         target : Hash
@@ -536,7 +536,7 @@ named name encode action param =
             (name ++ "|" ++ encode param)
                 |> stringToHash
     in
-    Monad "named"
+    BuildTask "named"
         (\input_ deps ->
             if hashSetMember target input_.existing || hashSetMember target deps then
                 BackendTask.succeed ( target, deps )

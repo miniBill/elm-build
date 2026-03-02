@@ -6,7 +6,7 @@ import BackendTask.Do as Do
 import BackendTask.Extra
 import BackendTask.Time
 import BuildAction
-import Cache
+import BuildTask exposing (BuildTask, FileOrDirectory)
 import Cli.Option as Option
 import Cli.OptionsParser as OptionsParser
 import Cli.Program as Program
@@ -24,7 +24,7 @@ run =
 
 type alias Config inputs =
     { getInputs : BackendTask FatalError inputs
-    , buildAction : inputs -> Cache.Monad Cache.FileOrDirectory
+    , buildAction : inputs -> BuildTask FileOrDirectory
     , buildDirectory : Path
     , outputName : Path
     , removeStale : Bool
@@ -32,7 +32,7 @@ type alias Config inputs =
     }
 
 
-programConfig : Program.Config (Config (List ( Path, Cache.Monad Cache.FileOrDirectory )))
+programConfig : Program.Config (Config (List ( Path, BuildTask FileOrDirectory )))
 programConfig =
     Program.config
         |> Program.add
@@ -85,7 +85,7 @@ task config =
         Do.do config.getInputs <| \inputs ->
         Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Processing inputs") <| \_ ->
         Do.exec "mkdir" [ "-p", Path.toString config.buildDirectory ] <| \_ ->
-        Do.do (Cache.run { jobs = config.jobs } config.buildDirectory (config.buildAction inputs)) <| \combined ->
+        Do.do (BuildTask.run { jobs = config.jobs } config.buildDirectory (config.buildAction inputs)) <| \combined ->
         Do.exec "rm" [ "-f", Path.toString config.outputName ] <| \_ ->
         symlink_
             { source = config.outputName

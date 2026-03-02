@@ -1,9 +1,9 @@
-module Cache.Unsafe exposing (named)
+module BuildTask.Unsafe exposing (named)
 
 {-| -}
 
-import Cache exposing (FileOrDirectory)
-import Cache.Internal as Internal
+import BuildTask exposing (FileOrDirectory)
+import BuildTask.Internal as Internal
 
 
 {-| Defines a named step. This function is useful to define steps where a computation is expensive,

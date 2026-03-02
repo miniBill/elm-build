@@ -1,25 +1,25 @@
-module Cache.Image exposing (getSize, getSvgSize, stripMetadata)
+module BuildTask.Image exposing (getSize, getSvgSize, stripMetadata)
 
 import Ansi.Color
-import Cache exposing (FileOrDirectory)
+import BuildTask exposing (BuildTask, FileOrDirectory)
 import Parser exposing ((|.), (|=), Parser)
 import Parser.Error
 import Parser.Workaround
 
 
-getSvgSize : FileOrDirectory -> Cache.Monad { width : Int, height : Int }
+getSvgSize : FileOrDirectory -> BuildTask { width : Int, height : Int }
 getSvgSize hash =
-    Cache.withFile hash parseSvgSize
+    BuildTask.withFile hash parseSvgSize
 
 
-parseSvgSize : String -> Cache.Monad { width : Int, height : Int }
+parseSvgSize : String -> BuildTask { width : Int, height : Int }
 parseSvgSize input =
     case Parser.run viewBoxParser input of
         Ok { width, height } ->
-            Cache.succeed { width = width, height = height }
+            BuildTask.succeed { width = width, height = height }
 
         Err e ->
-            Cache.fail (errorToString input e)
+            BuildTask.fail (errorToString input e)
 
 
 viewBoxParser : Parser { x : Int, y : Int, width : Int, height : Int }
@@ -67,11 +67,11 @@ errorToString src deadEnds =
         |> String.concat
 
 
-stripMetadata : FileOrDirectory -> Cache.Monad FileOrDirectory
+stripMetadata : FileOrDirectory -> BuildTask FileOrDirectory
 stripMetadata hash =
-    Cache.pipeThrough "exiftool" [ "-all=", "-", "-o", "-" ] hash
+    BuildTask.pipeThrough "exiftool" [ "-all=", "-", "-o", "-" ] hash
 
 
-getSize : FileOrDirectory -> Cache.Monad FileOrDirectory
+getSize : FileOrDirectory -> BuildTask FileOrDirectory
 getSize file =
-    Cache.pipeThrough "identify" [ "-ping", "-format", "%w %h", "-" ] file
+    BuildTask.pipeThrough "identify" [ "-ping", "-format", "%w %h", "-" ] file
