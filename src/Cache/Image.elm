@@ -1,4 +1,4 @@
-module Cache.Image exposing (doctypeParser, errorToString, getSize, getSvgSize, stripMetadata, viewBoxParser)
+module Cache.Image exposing (getSize, getSvgSize, stripMetadata)
 
 import Ansi.Color
 import Cache exposing (FileOrDirectory)

@@ -1,6 +1,5 @@
 module BuildAction exposing (buildAction, getInputs)
 
-import Ansi.Color
 import BackendTask exposing (BackendTask)
 import BackendTask.Glob as Glob
 import Cache exposing (FileOrDirectory)
@@ -24,9 +23,6 @@ import Gen.String
 import Json.Encode
 import List.Extra
 import Maybe.Extra
-import Parser exposing ((|.), (|=), DeadEnd, Parser)
-import Parser.Error
-import Parser.Workaround
 import Path exposing (Path)
 import String.Extra
 import String.Multiline
