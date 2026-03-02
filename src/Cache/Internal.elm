@@ -1,4 +1,4 @@
-module Cache.Internal exposing (Hash, HashSet, Monad(..), andThen, combineBy, commandLog, derive, execLog, extendHashWith, fail, hashSetEmpty, hashSetFromList, hashSetInsert, hashSetMember, hashSetToList, hashSetUnion, hashToPath, hashToString, hashToTmp, hashToWorkspace, input, inputHash, jobs, map, map2, map3, map4, run, runMonad, sequence, stringToHash, succeed, timed, triggerDebugger, withFile, withPrefix)
+module Cache.Internal exposing (Hash, HashSet, Input, Monad(..), andThen, combineBy, commandLog, derive, execLog, extendHashWith, fail, hashToPath, hashToString, hashToWorkspace, input, inputHash, jobs, map, map2, map3, map4, run, sequence, stringToHash, succeed, timed, triggerDebugger, withFile, withPrefix)
 
 import BST exposing (BST)
 import BackendTask exposing (BackendTask)
@@ -78,19 +78,24 @@ derive {- description -} target inner =
                     tmp =
                         hashToTmp target
                 in
-                Do.exec "rm" [ "-rf", hashToPath buildPath tmp ] <| \_ ->
-                Do.do
-                    (inner input_ tmp
-                        |> BackendTask.onError
-                            (\e ->
-                                Do.exec "rm" [ "-rf", hashToPath buildPath tmp ] <| \_ ->
-                                BackendTask.fail e
+                Do.exec "rm" [ "-rf", hashToPath buildPath tmp ] <|
+                    \_ ->
+                        Do.do
+                            (inner input_ tmp
+                                |> BackendTask.onError
+                                    (\e ->
+                                        Do.exec "rm" [ "-rf", hashToPath buildPath tmp ] <|
+                                            \_ ->
+                                                BackendTask.fail e
+                                    )
                             )
-                    )
-                <| \_ ->
-                Do.exec "mv" [ hashToPath buildPath tmp, hashToPath buildPath target ] <| \_ ->
-                Do.exec "chmod" [ "-R", "a=rX", hashToPath buildPath target ] <| \_ ->
-                BackendTask.succeed ( target, newDeps )
+                        <|
+                            \_ ->
+                                Do.exec "mv" [ hashToPath buildPath tmp, hashToPath buildPath target ] <|
+                                    \_ ->
+                                        Do.exec "chmod" [ "-R", "a=rX", hashToPath buildPath target ] <|
+                                            \_ ->
+                                                BackendTask.succeed ( target, newDeps )
         )
 
 
@@ -305,33 +310,35 @@ withFile : Hash -> (String -> Monad a) -> Monad a
 withFile hash f =
     Monad "withFile"
         (\({ buildPath } as input_) deps ->
-            Do.allowFatal (File.rawFile (hashToPath buildPath hash)) <| \raw ->
-            runMonad (f raw) input_ (hashSetInsert hash deps)
+            Do.allowFatal (File.rawFile (hashToPath buildPath hash)) <|
+                \raw ->
+                    runMonad (f raw) input_ (hashSetInsert hash deps)
         )
 
 
 run : { jobs : Maybe Int } -> Path -> Monad Hash -> BackendTask FatalError { output : Path, intermediate : List Path }
 run config buildPath m =
-    Do.do (listExisting buildPath) <| \existing ->
-    let
-        input_ : Input
-        input_ =
-            { existing = existing
-            , prefix = []
-            , buildPath = buildPath
-            , jobs = config.jobs
-            }
-    in
-    runMonad m input_ hashSetEmpty
-        |> BackendTask.map
-            (\( output, deps ) ->
-                { output = Path.path (hashToPath buildPath output)
-                , intermediate =
-                    deps
-                        |> hashSetToList
-                        |> List.map (\raw -> raw |> hashToPath buildPath |> Path.path)
-                }
-            )
+    Do.do (listExisting buildPath) <|
+        \existing ->
+            let
+                input_ : Input
+                input_ =
+                    { existing = existing
+                    , prefix = []
+                    , buildPath = buildPath
+                    , jobs = config.jobs
+                    }
+            in
+            runMonad m input_ hashSetEmpty
+                |> BackendTask.map
+                    (\( output, deps ) ->
+                        { output = Path.path (hashToPath buildPath output)
+                        , intermediate =
+                            deps
+                                |> hashSetToList
+                                |> List.map (\raw -> raw |> hashToPath buildPath |> Path.path)
+                        }
+                    )
 
 
 listExisting : Path -> BackendTask FatalError HashSet
@@ -408,28 +415,29 @@ jobs =
             -> (() -> BackendTask FatalError Int)
             -> BackendTask FatalError Int
         tryRunningOrElse cmd args orElse =
-            Do.do (Script.command cmd args |> BackendTask.toResult) <| \nprocResult ->
-            case nprocResult of
-                Ok output ->
-                    let
-                        trimmed : String
-                        trimmed =
-                            String.trim output
-                    in
-                    case String.toInt trimmed of
-                        Nothing ->
+            Do.do (Script.command cmd args |> BackendTask.toResult) <|
+                \nprocResult ->
+                    case nprocResult of
+                        Ok output ->
                             let
-                                message : String
-                                message =
-                                    "Invalid " ++ String.join " " (cmd :: args) ++ " output: " ++ Json.Encode.encode 0 (Json.Encode.string trimmed)
+                                trimmed : String
+                                trimmed =
+                                    String.trim output
                             in
-                            BackendTask.fail (FatalError.fromString message)
+                            case String.toInt trimmed of
+                                Nothing ->
+                                    let
+                                        message : String
+                                        message =
+                                            "Invalid " ++ String.join " " (cmd :: args) ++ " output: " ++ Json.Encode.encode 0 (Json.Encode.string trimmed)
+                                    in
+                                    BackendTask.fail (FatalError.fromString message)
 
-                        Just j ->
-                            BackendTask.succeed j
+                                Just j ->
+                                    BackendTask.succeed j
 
-                Err _ ->
-                    orElse ()
+                        Err _ ->
+                            orElse ()
     in
     Monad "jobs"
         (\input_ deps ->
@@ -441,14 +449,16 @@ jobs =
                             BackendTask.succeed j
 
                         Nothing ->
-                            tryRunningOrElse "nproc" [ "--all" ] <| \_ ->
-                            tryRunningOrElse "sysctl" [ "-n", "hw.logicalcpu" ] <| \_ ->
-                            let
-                                message : String
-                                message =
-                                    "Failed to run either `nproc --all` or `sysctl -n hw.logicalcpu`. You can work around this by specifying an explicit number of jobs to run in parallel"
-                            in
-                            BackendTask.fail (FatalError.fromString message)
+                            tryRunningOrElse "nproc" [ "--all" ] <|
+                                \_ ->
+                                    tryRunningOrElse "sysctl" [ "-n", "hw.logicalcpu" ] <|
+                                        \_ ->
+                                            let
+                                                message : String
+                                                message =
+                                                    "Failed to run either `nproc --all` or `sysctl -n hw.logicalcpu`. You can work around this by specifying an explicit number of jobs to run in parallel"
+                                            in
+                                            BackendTask.fail (FatalError.fromString message)
             in
             task |> BackendTask.map (\j -> ( j, deps ))
         )
@@ -482,18 +492,20 @@ input : Path -> Monad Hash
 input inputPath =
     Monad "input"
         (\{ prefix } deps ->
-            Do.do (commandLog prefix "b3sum" [ Path.toString inputPath ]) <| \body ->
-            case inputHash body of
-                Err e ->
-                    BackendTask.fail (FatalError.fromString e)
+            Do.do (commandLog prefix "b3sum" [ Path.toString inputPath ]) <|
+                \body ->
+                    case inputHash body of
+                        Err e ->
+                            BackendTask.fail (FatalError.fromString e)
 
-                Ok hash ->
-                    BackendTask.succeed ( hash, deps )
+                        Ok hash ->
+                            BackendTask.succeed ( hash, deps )
         )
         |> andThen
             (\hash ->
-                derive {- "input" -} hash <| \{ prefix, buildPath } target ->
-                execLog prefix "cp" [ Path.toString inputPath, hashToPath buildPath target ]
+                derive {- "input" -} hash <|
+                    \{ prefix, buildPath } target ->
+                        execLog prefix "cp" [ Path.toString inputPath, hashToPath buildPath target ]
             )
 
 
