@@ -1,4 +1,4 @@
-module BuildAction exposing (buildAction, getInputs)
+module Buildfile exposing (buildAction, getInputs)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Glob as Glob

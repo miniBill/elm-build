@@ -5,8 +5,8 @@ import BackendTask exposing (BackendTask)
 import BackendTask.Do as Do
 import BackendTask.Extra
 import BackendTask.Time
-import BuildAction
 import BuildTask exposing (BuildTask, FileOrDirectory)
+import Buildfile
 import Cli.Option as Option
 import Cli.OptionsParser as OptionsParser
 import Cli.Program as Program
@@ -39,8 +39,8 @@ programConfig =
             (OptionsParser.build
                 (\inputDirectory ->
                     Config
-                        (BuildAction.getInputs { inputDirectory = inputDirectory })
-                        (BuildAction.buildAction { inputDirectory = inputDirectory })
+                        (Buildfile.getInputs { inputDirectory = inputDirectory })
+                        (Buildfile.buildAction { inputDirectory = inputDirectory })
                 )
                 |> OptionsParser.with
                     (Option.requiredKeywordArg "input"
