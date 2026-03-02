@@ -4,6 +4,7 @@ import BackendTask exposing (BackendTask)
 import BackendTask.Glob as Glob
 import Cache exposing (FileOrDirectory)
 import Cache.Do as Do
+import Cache.ElmCodegen as ElmCodegen
 import Cache.Font as Font
 import Cache.Image as Image
 import Elm
@@ -93,15 +94,15 @@ buildAction config inputs =
                 |> Cache.withPrefix ("[" ++ String.fromInt inputSize ++ "/" ++ String.fromInt inputSize ++ "]")
     in
     Do.map4 T4
-        (elmCodegen (imagesElmFile processedFiles))
+        (ElmCodegen.elmCodegen (imagesElmFile processedFiles))
+        (ElmCodegen.elmCodegen (fontsElmFile processedFiles))
         (imagesSizesFile processedFiles)
-        (elmCodegen (fontsElmFile processedFiles))
         publicFolder
     <| \(T4 imagesElm imageSizes fontsElm public) ->
     Cache.combine
         [ imagesElm
-        , { filename = Path.path "image-sizes", hash = imageSizes }
         , fontsElm
+        , { filename = Path.path "image-sizes", hash = imageSizes }
         , { filename = Path.path "public", hash = public }
         ]
 
@@ -188,13 +189,6 @@ fontsElmFile files =
                 Elm.declaration (String.replace " " "_" family) (Gen.Html.Attributes.style "font-family" family)
             )
         |> Elm.file [ "Fonts" ]
-
-
-elmCodegen : Elm.File -> Cache.Monad { filename : Path, hash : FileOrDirectory }
-elmCodegen file =
-    Do.writeFile file.contents <| \hash ->
-    Do.pipeThrough "elm-format" [ "--stdin" ] hash <| \formatted ->
-    Cache.succeed { filename = Path.path ("generated/" ++ file.path), hash = formatted }
 
 
 imagesElmFile : List ProcessedFile -> Elm.File
