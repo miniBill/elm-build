@@ -12,9 +12,12 @@ and can be skipped when the inputs don't change. _Make sure to read the correctn
 **CORRECTNESS:**
 
 1.  The name must be unique
-2.  The function passed in must not use any value which is derived from previous steps
+2.  The second parameter must completely encode the parameter. It should be some form of `toString`.
+3.  The last parameter must not use any value which is derived from previous steps
 
-To satisfy the second condition the best strategy is to define a new top level function without explicit arguments.
+To satisfy the second condition you can use `Json.Encode.encode` or a [Codec](https://package.elm-lang.org/packages/miniBill/elm-codec/latest/Codec#Codec).
+
+To satisfy the third condition the best strategy is to define a new top level function without explicit arguments.
 
 Example:
 
@@ -24,7 +27,7 @@ Example:
 
     foo : String -> Cache.Monad FileOrDirectory
     foo =
-        Cache.Unsafe.named "Example.Mod.foo" identity (\input ->
+        Cache.Unsafe.named "Example.Mod.foo" (Codec.encodeToString 0 codec) (\input ->
             -- do something with the input
         )
 
@@ -34,5 +37,5 @@ This approach is inspired by [noredink/elm-review-html-lazy](https://package.elm
 
 -}
 named : String -> (a -> String) -> (a -> Cache.Monad FileOrDirectory) -> a -> Cache.Monad FileOrDirectory
-named name encode action param =
-    Internal.named name encode action param
+named name toString action param =
+    Internal.named name toString action param
