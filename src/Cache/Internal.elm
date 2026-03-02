@@ -42,6 +42,11 @@ derive {- description -} target inner =
                 newDeps : HashSet
                 newDeps =
                     hashSetInsert target deps
+
+                -- appendLog : String -> BackendTask FatalError ()
+                -- appendLog line =
+                --     BackendTask.Custom.run "appendLog" (Json.Encode.string line) (Json.Decode.succeed ())
+                --         |> BackendTask.allowFatal
             in
             -- Do.do
             --     (appendLog
@@ -83,10 +88,6 @@ derive {- description -} target inner =
 
 
 
--- appendLog : String -> BackendTask FatalError ()
--- appendLog line =
---     BackendTask.Custom.run "appendLog" (Json.Encode.string line) (Json.Decode.succeed ())
---         |> BackendTask.allowFatal
 ------------
 -- HASHES --
 ------------
