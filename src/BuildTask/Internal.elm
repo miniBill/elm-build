@@ -30,6 +30,7 @@ type alias Input =
     , prefix : List String
     , buildPath : Path
     , jobs : Maybe Int
+    , debug : Bool
     }
 
 
@@ -50,25 +51,25 @@ derive description target inner =
                 newDeps =
                     hashSetInsert target deps
 
-                -- appendLog : String -> BackendTask FatalError ()
-                -- appendLog line =
-                --     BackendTask.Custom.run "appendLog" (Json.Encode.string line) (Json.Decode.succeed ())
-                --         |> BackendTask.allowFatal
+                appendLog : BackendTask FatalError ()
+                appendLog =
+                    if input_.debug then
+                        (hashToPath buildPath target
+                            ++ ": "
+                            ++ description
+                         -- ++ " from "
+                         -- ++ (deps
+                         --         |> hashSetToList
+                         --         |> List.map (hashToPath buildPath)
+                         --         |> String.join ", "
+                         --    )
+                        )
+                            |> Script.log
+
+                    else
+                        BackendTask.succeed ()
             in
-            -- Do.do
-            --     (appendLog
-            --         (hashToPath path   target
-            --             ++ ": "
-            --             ++ description
-            --             ++ " from "
-            --             ++ (prev
-            --                     |> Set.toList
-            --                     |> String.join ", "
-            --                )
-            --         )
-            --         |> BackendTask.quiet
-            --     )
-            -- <| \_ ->
+            Do.do appendLog <| \_ ->
             if hashSetMember target existing || hashSetMember target deps then
                 BackendTask.succeed ( target, newDeps )
 
@@ -97,7 +98,8 @@ derive description target inner =
                         (Script.exec "mv" [ hashToPath buildPath tmp, hashToPath buildPath target ]
                             |> BackendTask.onError
                                 (\e ->
-                                    Do.log ("Error inside " ++ description) <| \_ ->
+                                    Do.do (fileExists (hashToPath buildPath target)) <| \exists2 ->
+                                    Do.log ("Error inside " ++ description ++ ", exists " ++ hashToPath buildPath target ++ ": " ++ Debug.toString exists2) <| \_ ->
                                     BackendTask.fail e
                                 )
                         )
@@ -109,27 +111,13 @@ derive description target inner =
 
 fileExists : String -> BackendTask FatalError Bool
 fileExists path =
-    File.rawFile path
-        |> BackendTask.map (\_ -> True)
-        |> BackendTask.onError
-            (\e ->
-                case e.recoverable of
-                    File.FileDoesntExist ->
-                        BackendTask.succeed False
-
-                    _ ->
-                        BackendTask.fail e.fatal
-            )
-
-
-debug : Bool
-debug =
-    False
+    BackendTask.Custom.run "exists" (Json.Encode.string path) Json.Decode.bool
+        |> BackendTask.allowFatal
 
 
 runMonad : BuildTask a -> Input -> HashSet -> BackendTask FatalError ( a, HashSet )
 runMonad (BuildTask label m) input_ deps =
-    if debug then
+    if input_.debug then
         m input_ deps
             |> BackendTask.andThen
                 (\( v, newDeps ) ->
@@ -243,7 +231,7 @@ withFile hash f =
         )
 
 
-run : { jobs : Maybe Int } -> Path -> BuildTask Hash -> BackendTask FatalError { output : Path, intermediate : List Path }
+run : { jobs : Maybe Int, debug : Bool } -> Path -> BuildTask Hash -> BackendTask FatalError { output : Path, intermediate : List Path }
 run config buildPath m =
     Do.do (listExisting buildPath) <| \existing ->
     let
@@ -253,6 +241,7 @@ run config buildPath m =
             , prefix = []
             , buildPath = buildPath
             , jobs = config.jobs
+            , debug = config.debug
             }
     in
     runMonad m input_ hashSetEmpty

@@ -29,6 +29,7 @@ type alias Config inputs =
     , outputName : Path
     , removeStale : Bool
     , jobs : Maybe Int
+    , debug : Bool
     }
 
 
@@ -74,6 +75,10 @@ programConfig =
                                         Ok i
                             )
                     )
+                |> OptionsParser.with
+                    (Option.flag "debug"
+                        |> Option.withDescription "Number of parallel jobs to run"
+                    )
             )
 
 
@@ -85,7 +90,7 @@ task config =
         Do.do config.getInputs <| \inputs ->
         Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Processing inputs") <| \_ ->
         Do.exec "mkdir" [ "-p", Path.toString config.buildDirectory ] <| \_ ->
-        Do.do (BuildTask.run { jobs = config.jobs } config.buildDirectory (config.buildAction inputs)) <| \combined ->
+        Do.do (BuildTask.run { jobs = config.jobs, debug = config.debug } config.buildDirectory (config.buildAction inputs)) <| \combined ->
         Do.exec "rm" [ "-f", Path.toString config.outputName ] <| \_ ->
         symlink_
             { source = config.outputName

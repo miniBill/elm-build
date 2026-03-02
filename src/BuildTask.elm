@@ -293,7 +293,7 @@ writeFile content =
 
 
 {-| -}
-run : { jobs : Maybe Int } -> Path -> BuildTask FileOrDirectory -> BackendTask FatalError { output : Path, intermediate : List Path }
+run : { jobs : Maybe Int, debug : Bool } -> Path -> BuildTask FileOrDirectory -> BackendTask FatalError { output : Path, intermediate : List Path }
 run config buildPath m =
     Internal.run config buildPath m
 
