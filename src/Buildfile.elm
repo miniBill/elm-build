@@ -7,6 +7,7 @@ import BuildTask.Do as Do
 import BuildTask.ElmCodegen as ElmCodegen
 import BuildTask.Font as Font
 import BuildTask.Image as Image
+import BuildTask.Unsafe
 import Elm
 import Elm.Annotation
 import Elm.Arg
@@ -109,13 +110,13 @@ buildAction config inputs =
                 |> BuildTask.withPrefix ("[" ++ String.fromInt inputSize ++ "/" ++ String.fromInt inputSize ++ "]")
     in
     Do.map4 T4
-        (ElmCodegen.elmCodegen (imagesElmFile processedFiles))
+        (imagesElmFile processedFiles)
         (ElmCodegen.elmCodegen (fontsElmFile fontFiles))
         (imagesSizesFile imageFiles)
         publicFolder
     <| \(T4 imagesElm fontsElm imageSizes public) ->
     BuildTask.combine
-        [ imagesElm
+        [ { filename = Path.path "generated/Images.elm", hash = imagesElm }
         , fontsElm
         , { filename = Path.path "image-sizes", hash = imageSizes }
         , { filename = Path.path "public", hash = public }
@@ -196,26 +197,63 @@ fontsElmFile files =
         |> Elm.file [ "Fonts" ]
 
 
-imagesElmFile : List ProcessedFile -> Elm.File
-imagesElmFile processedFiles =
-    processedFiles
-        |> List.filterMap
-            (\file ->
-                case file of
-                    ProcessedImage image ->
-                        Just (processedImageToDeclaration image)
+imagesElmFile : List ProcessedFile -> BuildTask FileOrDirectory
+imagesElmFile =
+    BuildTask.Unsafe.named "imagesElmFile"
+        encodeProcessedFiles
+        (\processedFiles ->
+            let
+                file : Elm.File
+                file =
+                    processedFiles
+                        |> List.filterMap
+                            (\processedFile ->
+                                case processedFile of
+                                    ProcessedImage image ->
+                                        Just (processedImageToDeclaration image.original)
 
-                    ProcessedSvg image ->
-                        Just (processedSvgToDeclaration image)
+                                    ProcessedSvg image ->
+                                        Just (processedSvgToDeclaration image)
 
-                    _ ->
-                        Nothing
-            )
-        |> (::) standardFormats.declaration
-        |> (::) getSizes_.declaration
-        |> (::) toSources.declaration
-        |> (::) (toPicture.declaration |> Elm.expose)
-        |> Elm.file [ "Images" ]
+                                    _ ->
+                                        Nothing
+                            )
+                        |> (::) standardFormats.declaration
+                        |> (::) getSizes_.declaration
+                        |> (::) toSources.declaration
+                        |> (::) (toPicture.declaration |> Elm.expose)
+                        |> Elm.file [ "Images" ]
+            in
+            Do.writeFile file.contents <| \hash ->
+            BuildTask.pipeThrough "elm-format" [ "--stdin" ] hash
+        )
+
+
+encodeProcessedFiles : List ProcessedFile -> { files : List FileOrDirectory, additionalData : List String }
+encodeProcessedFiles processedFiles =
+    let
+        ( files, additionalData ) =
+            processedFiles
+                |> List.map encodeProcessedFile
+                |> List.unzip
+    in
+    { files = files, additionalData = additionalData }
+
+
+encodeProcessedFile : ProcessedFile -> ( FileOrDirectory, String )
+encodeProcessedFile processedFile =
+    case processedFile of
+        ProcessedImage { original } ->
+            ( original.hash, Path.toString original.filename )
+
+        ProcessedCss original ->
+            ( original.hash, Path.toString original.filename )
+
+        ProcessedSvg original ->
+            ( original.hash, Path.toString original.filename )
+
+        ProcessedFont original ->
+            ( original.hash, Path.toString original.filename )
 
 
 processedFileToFileList : ProcessedFile -> List { filename : Path, hash : FileOrDirectory }
@@ -510,11 +548,9 @@ standardFormats =
 
 
 processedImageToDeclaration :
-    { image
-        | original : HashedFileWith { width : Int, height : Int }
-    }
+    HashedFileWith { width : Int, height : Int }
     -> Elm.Declaration
-processedImageToDeclaration { original } =
+processedImageToDeclaration original =
     let
         name : String
         name =

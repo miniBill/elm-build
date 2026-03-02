@@ -528,12 +528,17 @@ hashSetFromList list =
         |> HashSet
 
 
-named : String -> (a -> String) -> (a -> BuildTask Hash) -> a -> BuildTask Hash
+named : String -> (a -> { files : List Hash, additionalData : List String }) -> (a -> BuildTask Hash) -> a -> BuildTask Hash
 named name encode action param =
     let
+        encoded : { files : List Hash, additionalData : List String }
+        encoded =
+            encode param
+
         target : Hash
         target =
-            (name ++ "|" ++ encode param)
+            (name :: encoded.additionalData ++ List.map hashToString encoded.files)
+                |> String.join "|"
                 |> stringToHash
     in
     BuildTask "named"
