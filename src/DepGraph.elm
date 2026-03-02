@@ -4,6 +4,7 @@ module DepGraph exposing
     , filePathToModuleName
     , buildGraph
     , transitiveDeps
+    , moduleNameToFilePath
     )
 
 {-| Pure dependency graph analysis for Elm source files.
@@ -22,6 +23,7 @@ import Set exposing (Set)
 type Graph
     = Graph
         { deps : Dict String (Set String)
+        , moduleToFile : Dict String String
         }
 
 
@@ -135,7 +137,7 @@ buildGraph { sourceDirectories, files } =
                     )
                 |> Dict.fromList
     in
-    Graph { deps = deps }
+    Graph { deps = deps, moduleToFile = moduleToFile }
 
 
 {-| Get all transitive dependencies of a file (including itself).
@@ -144,6 +146,11 @@ Uses BFS with a visited set to handle circular dependencies.
 Returns file paths. If the file path is unknown, returns a singleton set.
 
 -}
+moduleNameToFilePath : Graph -> String -> Maybe String
+moduleNameToFilePath (Graph { moduleToFile }) moduleName =
+    Dict.get moduleName moduleToFile
+
+
 transitiveDeps : Graph -> String -> Set String
 transitiveDeps (Graph { deps }) startFile =
     bfs deps [ startFile ] (Set.singleton startFile)
