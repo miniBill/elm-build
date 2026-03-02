@@ -1,7 +1,9 @@
-module Cache.Font exposing (Data, Style(..), Weight(..), parse, styleToString, weightToNumber)
+module Cache.Font exposing (Data, Style(..), Weight(..), parse, styleToString, toCssFile, weightToNumber)
 
 import Cache exposing (FileOrDirectory)
 import Cache.Do as Do
+import Path exposing (Path)
+import String.Multiline
 
 
 type alias Data =
@@ -149,3 +151,27 @@ parseStyleAndWeight styleAndWeight =
                     )
             )
             (Ok { style = StyleNormal, weight = WeightNormal })
+
+
+toCssFile :
+    List
+        { a
+            | family : String
+            , style : Style
+            , weight : Weight
+            , filename : Path
+        }
+    -> String
+toCssFile files =
+    files
+        |> List.map
+            (\{ family, style, weight, filename } ->
+                String.Multiline.here """
+                @font-face {
+                    font-family: \"""" ++ family ++ """";
+                    font-style: """ ++ styleToString style ++ """;
+                    font-weight: """ ++ String.fromInt (weightToNumber weight) ++ """;
+                    src: url(\"""" ++ Path.toString filename ++ """");
+                }"""
+            )
+        |> String.join "\n\n"

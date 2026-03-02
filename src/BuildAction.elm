@@ -92,8 +92,12 @@ buildAction config inputs =
 
         publicFolder : Cache.Monad FileOrDirectory
         publicFolder =
-            fontsCssFile fontFiles <| \fontsCss ->
-            (fontsCss :: List.concatMap processedFileToFileList processedFiles)
+            Do.writeFile (Font.toCssFile fontFiles) <| \fontsCssHash ->
+            ({ filename = Path.path "fonts.css"
+             , hash = fontsCssHash
+             }
+                :: List.concatMap processedFileToFileList processedFiles
+            )
                 |> Cache.combine
                 |> Cache.withPrefix ("[" ++ String.fromInt inputSize ++ "/" ++ String.fromInt inputSize ++ "]")
     in
@@ -153,31 +157,6 @@ imagesSizesFile processedFiles =
                 |> String.join "\n"
     in
     Cache.writeFile content
-
-
-fontsCssFile :
-    List (HashedFileWith Font.Data)
-    -> ({ filename : Path, hash : FileOrDirectory } -> Cache.Monad a)
-    -> Cache.Monad a
-fontsCssFile files k =
-    let
-        content : String
-        content =
-            files
-                |> List.map
-                    (\{ family, style, weight, filename } ->
-                        String.Multiline.here """
-                            @font-face {
-                                font-family: \"""" ++ family ++ """";
-                                font-style: """ ++ Font.styleToString style ++ """;
-                                font-weight: """ ++ String.fromInt (Font.weightToNumber weight) ++ """;
-                                src: url(\"""" ++ Path.toString filename ++ """");
-                            }"""
-                    )
-                |> String.join "\n\n"
-    in
-    Do.writeFile content <| \hash ->
-    k { filename = Path.path "fonts.css", hash = hash }
 
 
 fontsElmFile : List (HashedFileWith Font.Data) -> Elm.File
