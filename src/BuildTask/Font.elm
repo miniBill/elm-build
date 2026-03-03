@@ -1,7 +1,6 @@
 module BuildTask.Font exposing (Data, Style(..), Weight(..), parse, styleToString, toCssFile, weightToNumber)
 
 import BuildTask exposing (BuildTask, FileOrDirectory)
-import BuildTask.Do as Do
 import BuildTask.Unsafe.Do as Do
 import Path exposing (Path)
 import String.Multiline

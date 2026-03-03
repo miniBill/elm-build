@@ -3,7 +3,6 @@ module BuildTask.Elm exposing (codegen, format)
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import BuildTask.Do as Do
 import BuildTask.Unsafe as Unsafe
-import BuildTask.Unsafe.Do as Do
 import Elm
 import Path exposing (Path)
 
