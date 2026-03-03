@@ -1,4 +1,4 @@
-module Path exposing (Path, appendToFilename, asChildOf, directory, extension, filename, filenameWithoutExtension, path, relativeTo, replaceAll, replaceExtensionWith, toString)
+module Path exposing (Path, appendToFilename, directory, extension, filename, filenameWithoutExtension, path, relativeTo, replaceAll, replaceExtensionWith, toString)
 
 import List.Extra
 
@@ -51,11 +51,6 @@ type Path
 toString : Path -> String
 toString (Path d f) =
     String.join "/" (d ++ [ f ])
-
-
-asChildOf : String -> Path -> Path
-asChildOf newParent (Path d f) =
-    Path (newParent :: d) f
 
 
 relativeTo : Path -> Path -> Path
