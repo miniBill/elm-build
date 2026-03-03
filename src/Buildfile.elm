@@ -199,35 +199,36 @@ fontsElmFile files =
 
 
 imagesElmFile : List ProcessedFile -> BuildTask FileOrDirectory
-imagesElmFile =
-    List.filterMap
-        (\processedFile ->
-            case processedFile of
-                ProcessedImage { original } ->
-                    Just
-                        { svg = False
-                        , filename = original.filename
-                        , hash = original.hash
-                        , width = original.width
-                        , height = original.height
-                        }
+imagesElmFile list =
+    list
+        |> List.filterMap
+            (\processedFile ->
+                case processedFile of
+                    ProcessedImage { original } ->
+                        Just
+                            { svg = False
+                            , filename = original.filename
+                            , hash = original.hash
+                            , width = original.width
+                            , height = original.height
+                            }
 
-                ProcessedSvg original ->
-                    Just
-                        { svg = True
-                        , filename = original.filename
-                        , hash = original.hash
-                        , width = original.width
-                        , height = original.height
-                        }
+                    ProcessedSvg original ->
+                        Just
+                            { svg = True
+                            , filename = original.filename
+                            , hash = original.hash
+                            , width = original.width
+                            , height = original.height
+                            }
 
-                ProcessedCss _ ->
-                    Nothing
+                    ProcessedCss _ ->
+                        Nothing
 
-                ProcessedFont _ ->
-                    Nothing
-        )
-        >> Unsafe.named "imagesElmFile"
+                    ProcessedFont _ ->
+                        Nothing
+            )
+        |> Unsafe.named "imagesElmFile"
             encodeProcessedFiles
             (\processedFiles ->
                 let
