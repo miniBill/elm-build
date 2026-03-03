@@ -14,53 +14,54 @@ import Time
 
 timed : String -> String -> BackendTask error a -> BackendTask error a
 timed labelBefore labelAfter task =
-    if labelBefore == "DISABLED FOR NOW" then
-        let
-            options : Spinner.Options error ( a, Int )
-            options =
-                Spinner.options labelBefore
-                    |> Spinner.withOnCompletion
-                        (\res ->
-                            case res of
-                                Err _ ->
-                                    ( Spinner.Fail, Nothing )
+    case labelBefore of
+        "DISABLED FOR NOW" ->
+            let
+                options : Spinner.Options error ( a, Int )
+                options =
+                    Spinner.options labelBefore
+                        |> Spinner.withOnCompletion
+                            (\res ->
+                                case res of
+                                    Err _ ->
+                                        ( Spinner.Fail, Nothing )
 
-                                Ok ( _, delta ) ->
-                                    let
-                                        msg : String
-                                        msg =
-                                            labelAfter ++ " in " ++ String.fromInt delta ++ "ms"
-                                    in
-                                    ( Spinner.Succeed, Just msg )
-                        )
+                                    Ok ( _, delta ) ->
+                                        let
+                                            msg : String
+                                            msg =
+                                                labelAfter ++ " in " ++ String.fromInt delta ++ "ms"
+                                        in
+                                        ( Spinner.Succeed, Just msg )
+                            )
 
-            inner : BackendTask error ( a, Int )
-            inner =
-                Do.do BackendTask.Time.now <| \before ->
-                Do.do task <| \res ->
-                Do.do BackendTask.Time.now <| \after ->
-                let
-                    delta : Int
-                    delta =
-                        Time.posixToMillis after - Time.posixToMillis before
-                in
-                BackendTask.succeed ( res, delta )
-        in
-        Spinner.runTaskWithOptions options inner
-            |> BackendTask.map Tuple.first
+                inner : BackendTask error ( a, Int )
+                inner =
+                    Do.do BackendTask.Time.now <| \before ->
+                    Do.do task <| \res ->
+                    Do.do BackendTask.Time.now <| \after ->
+                    let
+                        delta : Int
+                        delta =
+                            Time.posixToMillis after - Time.posixToMillis before
+                    in
+                    BackendTask.succeed ( res, delta )
+            in
+            Spinner.runTaskWithOptions options inner
+                |> BackendTask.map Tuple.first
 
-    else
-        Do.do BackendTask.Time.now <| \before ->
-        Do.log labelBefore <| \_ ->
-        Do.do task <| \res ->
-        Do.do BackendTask.Time.now <| \after ->
-        let
-            delta : Int
-            delta =
-                Time.posixToMillis after - Time.posixToMillis before
-        in
-        Do.log (labelAfter ++ " in " ++ String.fromInt delta ++ "ms") <| \_ ->
-        BackendTask.succeed res
+        _ ->
+            Do.do BackendTask.Time.now <| \before ->
+            Do.log labelBefore <| \_ ->
+            Do.do task <| \res ->
+            Do.do BackendTask.Time.now <| \after ->
+            let
+                delta : Int
+                delta =
+                    Time.posixToMillis after - Time.posixToMillis before
+            in
+            Do.log (labelAfter ++ " in " ++ String.fromInt delta ++ "ms") <| \_ ->
+            BackendTask.succeed res
 
 
 combineBy :
