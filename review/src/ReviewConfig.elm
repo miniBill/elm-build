@@ -67,7 +67,7 @@ config =
     [ Docs.ReviewAtDocs.rule
     , Derive.rule True []
     , Docs.ReviewLinksAndSections.rule
-    , EqualsCaseable.forbid EqualsCaseable.Everywhere
+    , EqualsCaseable.forbid EqualsCaseable.InIf
     , HtmlToElm.rule
     , LimitAliasedRecordSize.rule (20 |> LimitAliasedRecordSize.maxRecordSize)
     , NoBooleanCase.rule
