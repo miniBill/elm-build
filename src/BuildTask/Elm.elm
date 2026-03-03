@@ -11,7 +11,7 @@ import Path exposing (Path)
 codegen : Elm.File -> BuildTask { filename : Path, hash : FileOrDirectory }
 codegen file =
     Do.writeFile file.contents <| \hash ->
-    Do.pipeThrough "elm-format" [ "--stdin" ] hash <| \formatted ->
+    BuildTask.do (format hash) <| \formatted ->
     BuildTask.succeed { filename = Path.path ("generated/" ++ file.path), hash = formatted }
 
 
