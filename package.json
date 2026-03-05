@@ -1,7 +1,7 @@
 {
     "license": "BSD-3-Clause",
     "devDependencies": {
-        "elm-pages": "^3.1.1"
+        "elm-pages": "^3.2.0"
     },
     "scripts": {
         "start": "bunx elm-pages run src/Build.elm"
