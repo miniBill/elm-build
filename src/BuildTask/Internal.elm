@@ -75,7 +75,7 @@ derive description target inner =
                 BackendTask.succeed ( target, newDeps )
 
             else
-                Do.do (BackendTask.Customs.fileExists (hashToPath buildPath target)) <| \exists ->
+                Do.do (File.exists (hashToPath buildPath target)) <| \exists ->
                 if exists then
                     BackendTask.succeed ( target, newDeps )
 

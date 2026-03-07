@@ -1,4 +1,4 @@
-module BackendTask.Customs exposing (fileExists, profile, profileEnd, readdir, triggerDebugger)
+module BackendTask.Customs exposing (profile, profileEnd, readdir, triggerDebugger)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Custom
@@ -17,12 +17,6 @@ profile label =
 profileEnd : String -> BackendTask FatalError ()
 profileEnd label =
     BackendTask.Custom.run "profileEnd" (Json.Encode.string label) (Json.Decode.succeed ())
-        |> BackendTask.allowFatal
-
-
-fileExists : String -> BackendTask FatalError Bool
-fileExists path =
-    BackendTask.Custom.run "fileExists" (Json.Encode.string path) Json.Decode.bool
         |> BackendTask.allowFatal
 
 
