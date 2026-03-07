@@ -51,7 +51,7 @@ module BuildTask exposing
 import BackendTask exposing (BackendTask)
 import BackendTask.Do as Do
 import BackendTask.Extra
-import BuildTask.Internal as Internal
+import BuildTask.Internal as Internal exposing (HashKind)
 import FastDict as Dict exposing (Dict)
 import FatalError exposing (FatalError)
 import Pages.Script as Script
@@ -252,7 +252,7 @@ combineTree (Tree tree) =
         combined =
             Dict.union tree.files subtrees
 
-        outputHash : FileOrDirectory
+        outputHash : BuildTask FileOrDirectory
         outputHash =
             Dict.foldl
                 (\filename hash acc -> filename :: Internal.hashToString hash :: acc)
@@ -261,7 +261,8 @@ combineTree (Tree tree) =
                 |> String.join "|"
                 |> Internal.stringToHash
     in
-    Internal.derive "combine" outputHash <| \{ prefix, buildPath } target ->
+    do outputHash <| \combinedHash ->
+    Internal.derive "combine" combinedHash <| \{ prefix, buildPath } target ->
     Do.do (Internal.execLog prefix "mkdir" [ "-p", Internal.hashToPath buildPath target ]) <| \_ ->
     combined
         |> Dict.foldl (\outputFilename hash acc -> Internal.execLog prefix "cp" [ "-rl", Internal.hashToPath buildPath hash, Internal.hashToPath buildPath target ++ "/" ++ outputFilename ] :: acc) []
@@ -283,17 +284,13 @@ withFile hash f =
 {-| -}
 writeFile : String -> BuildTask FileOrDirectory
 writeFile content =
-    let
-        hash : FileOrDirectory
-        hash =
-            Internal.stringToHash content
-    in
+    do (Internal.stringToHash content) <| \hash ->
     Internal.derive "writeFile" hash <| \{ buildPath } target ->
     BackendTask.allowFatal (Script.writeFile { path = Internal.hashToPath buildPath target, body = content })
 
 
 {-| -}
-run : { jobs : Maybe Int, debug : Bool } -> Path -> BuildTask FileOrDirectory -> BackendTask FatalError { output : Path, intermediate : List Path }
+run : { jobs : Maybe Int, debug : Bool, hashKind : HashKind } -> Path -> BuildTask FileOrDirectory -> BackendTask FatalError { output : Path, intermediate : List Path }
 run config buildPath m =
     Internal.run config buildPath m
 

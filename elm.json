@@ -8,6 +8,7 @@
     "dependencies": {
         "direct": {
             "arowM/elm-multiline-string": "1.0.0",
+            "billstclair/elm-sha256": "1.0.9",
             "dillonkearns/elm-cli-options-parser": "4.0.0",
             "dillonkearns/elm-pages": "12.0.0",
             "elm/core": "1.0.5",

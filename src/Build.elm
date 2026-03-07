@@ -1,4 +1,4 @@
-module Build exposing (run)
+module Build exposing (fastHash, run, secureHash)
 
 import Ansi.Color
 import BackendTask exposing (BackendTask)
@@ -7,6 +7,7 @@ import BackendTask.Do as Do
 import BackendTask.Extra
 import BackendTask.Time
 import BuildTask exposing (BuildTask, FileOrDirectory)
+import BuildTask.Internal as Internal exposing (HashKind(..))
 import Buildfile
 import Cli.Option as Option
 import Cli.OptionsParser as OptionsParser
@@ -23,6 +24,10 @@ run =
     Script.withCliOptions programConfig task
 
 
+type alias HashKind =
+    Internal.HashKind
+
+
 type alias Config inputs =
     { getInputs : BackendTask FatalError inputs
     , buildAction : inputs -> BuildTask FileOrDirectory
@@ -31,7 +36,22 @@ type alias Config inputs =
     , removeStale : Bool
     , jobs : Maybe Int
     , debug : Bool
+    , hashKind : HashKind
     }
+
+
+{-| Use FNV1a for hashing. Suitable for local development.
+-}
+fastHash : HashKind
+fastHash =
+    HashFast
+
+
+{-| Use SHA256 for hashing. Suitable for a CI environment.
+-}
+secureHash : HashKind
+secureHash =
+    HashSecure
 
 
 programConfig : Program.Config (Config (List ( Path, BuildTask FileOrDirectory )))
@@ -80,6 +100,12 @@ programConfig =
                     (Option.flag "debug"
                         |> Option.withDescription "Number of parallel jobs to run"
                     )
+                |> OptionsParser.with
+                    (Option.optionalKeywordArg "hash-kind"
+                        |> Option.withDescription "Kind of hash to use. Choose fast for FNV1a, secure for sha256."
+                        |> Option.withDefault "fast"
+                        |> Option.oneOf [ ( "fast", HashFast ), ( "secure", HashSecure ) ]
+                    )
             )
 
 
@@ -91,7 +117,7 @@ task config =
         Do.do config.getInputs <| \inputs ->
         Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Processing inputs") <| \_ ->
         Do.exec "mkdir" [ "-p", Path.toString config.buildDirectory ] <| \_ ->
-        Do.do (BuildTask.run { jobs = config.jobs, debug = config.debug } config.buildDirectory (config.buildAction inputs)) <| \combined ->
+        Do.do (BuildTask.run { jobs = config.jobs, debug = config.debug, hashKind = config.hashKind } config.buildDirectory (config.buildAction inputs)) <| \combined ->
         Do.exec "rm" [ "-f", Path.toString config.outputName ] <| \_ ->
         symlink_
             { source = config.outputName

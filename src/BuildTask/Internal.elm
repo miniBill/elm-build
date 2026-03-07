@@ -1,4 +1,4 @@
-module BuildTask.Internal exposing (BuildTask(..), Hash, HashSet, Input, andThen, combineBy, commandLog, derive, execLog, extendHashWith, fail, hashToPath, hashToString, hashToWorkspace, input, inputHash, jobs, map, map2, map3, map4, named, run, sequence, stringToHash, succeed, timed, triggerDebugger, withFile, withPrefix)
+module BuildTask.Internal exposing (BuildTask(..), Hash, HashKind(..), HashSet, Input, andThen, combineBy, commandLog, derive, execLog, extendHashWith, fail, hashToPath, hashToString, hashToWorkspace, input, inputHash, jobs, map, map2, map3, map4, named, run, sequence, stringToHash, succeed, timed, triggerDebugger, withFile, withPrefix)
 
 import BST exposing (BST)
 import BackendTask exposing (BackendTask)
@@ -13,6 +13,7 @@ import Hex
 import Json.Encode
 import Pages.Script as Script
 import Path exposing (Path)
+import Sha256
 
 
 type BuildTask a
@@ -30,6 +31,7 @@ type alias Input =
     , buildPath : Path
     , jobs : Maybe Int
     , debug : Bool
+    , hashKind : HashKind
     }
 
 
@@ -223,7 +225,7 @@ withFile hash f =
         )
 
 
-run : { jobs : Maybe Int, debug : Bool } -> Path -> BuildTask Hash -> BackendTask FatalError { output : Path, intermediate : List Path }
+run : { jobs : Maybe Int, debug : Bool, hashKind : HashKind } -> Path -> BuildTask Hash -> BackendTask FatalError { output : Path, intermediate : List Path }
 run config buildPath m =
     Do.do (listExisting buildPath) <| \existing ->
     let
@@ -234,6 +236,7 @@ run config buildPath m =
             , buildPath = buildPath
             , jobs = config.jobs
             , debug = config.debug
+            , hashKind = config.hashKind
             }
     in
     runMonad m input_ hashSetEmpty
@@ -445,6 +448,11 @@ execLog prefix cmd args =
 ------------
 
 
+type HashKind
+    = HashFast
+    | HashSecure
+
+
 {-| -}
 type Hash
     = Hash String
@@ -483,18 +491,30 @@ hashToWorkspace (Hash hash) =
     Hash ("workspace-" ++ hash)
 
 
-extendHashWith : List String -> Hash -> Hash
+extendHashWith : List String -> Hash -> BuildTask Hash
 extendHashWith l (Hash r) =
     stringToHash (String.join "|" (r :: l))
 
 
-stringToHash : String -> Hash
+stringToHash : String -> BuildTask Hash
 stringToHash raw =
-    raw
-        |> FNV1a.hash
-        |> Hex.toString
-        |> String.padLeft 8 '0'
-        |> Hash
+    BuildTask "stringToHash"
+        (\{ hashKind } deps ->
+            let
+                hash : String
+                hash =
+                    case hashKind of
+                        HashFast ->
+                            raw
+                                |> FNV1a.hash
+                                |> Hex.toString
+                                |> String.padLeft 8 '0'
+
+                        HashSecure ->
+                            Sha256.sha256 raw
+            in
+            BackendTask.succeed ( Hash hash, deps )
+        )
 
 
 type HashSet
@@ -540,27 +560,27 @@ named name encode action param =
         encoded : { files : List Hash, additionalData : List String }
         encoded =
             encode param
-
-        target : Hash
-        target =
-            (name :: encoded.additionalData ++ List.map hashToString encoded.files)
-                |> String.join "|"
-                |> stringToHash
     in
-    BuildTask "named"
-        (\input_ deps ->
-            if hashSetMember target input_.existing || hashSetMember target deps then
-                BackendTask.succeed ( target, hashSetInsert target deps )
+    (name :: encoded.additionalData ++ List.map hashToString encoded.files)
+        |> String.join "|"
+        |> stringToHash
+        |> andThen
+            (\hash ->
+                BuildTask "named"
+                    (\input_ deps ->
+                        if hashSetMember hash input_.existing || hashSetMember hash deps then
+                            BackendTask.succeed ( hash, hashSetInsert hash deps )
 
-            else
-                runMonad (action param) input_ deps
-                    |> BackendTask.andThen
-                        (\( actionOutput, newDeps ) ->
-                            Do.exec "mv"
-                                [ hashToPath input_.buildPath actionOutput
-                                , hashToPath input_.buildPath target
-                                ]
-                            <| \_ ->
-                            BackendTask.succeed ( target, hashSetInsert target newDeps )
-                        )
-        )
+                        else
+                            runMonad (action param) input_ deps
+                                |> BackendTask.andThen
+                                    (\( actionOutput, newDeps ) ->
+                                        Do.exec "mv"
+                                            [ hashToPath input_.buildPath actionOutput
+                                            , hashToPath input_.buildPath hash
+                                            ]
+                                        <| \_ ->
+                                        BackendTask.succeed ( hash, hashSetInsert hash newDeps )
+                                    )
+                    )
+            )
