@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "automatically created by": "elm-review suppress",
+  "learn more": "elm-review suppress --help",
+  "suppressions": [
+    { "count": 8, "filePath": "src/BuildTask/Font.elm" },
+    { "count": 4, "filePath": "src/BuildTask/Internal.elm" },
+    { "count": 1, "filePath": "src/BackendTask/Extra.elm" }
+  ]
+}

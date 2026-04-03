@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "automatically created by": "elm-review suppress",
+  "learn more": "elm-review suppress --help",
+  "suppressions": [
+    { "count": 2, "filePath": "src/BackendTask/Extra.elm" },
+    { "count": 1, "filePath": "src/Build.elm" },
+    { "count": 1, "filePath": "src/Buildfile.elm" },
+    { "count": 1, "filePath": "src/BuildTask.elm" }
+  ]
+}
