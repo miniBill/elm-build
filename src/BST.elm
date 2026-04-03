@@ -1,4 +1,4 @@
-module BST exposing (BST, empty, fromList, insert, member, toList, union)
+module BST exposing (BST, empty, equals, fromList, insert, member, toList, union)
 
 import Array exposing (Array)
 
@@ -176,3 +176,43 @@ unique list =
                         t
             in
             List.reverse (nh :: nt)
+
+
+equals : BST comparable -> BST comparable -> Bool
+equals l r =
+    let
+        go : List (BST comparable) -> List (BST comparable) -> Bool
+        go lq rq =
+            case ( lq, rq ) of
+                ( BSTLeaf :: lt, _ ) ->
+                    go lt rq
+
+                ( _, BSTLeaf :: rt ) ->
+                    go lq rt
+
+                ( [], [] ) ->
+                    True
+
+                ( [], _ ) ->
+                    False
+
+                ( _, [] ) ->
+                    False
+
+                ( (BSTNode lv BSTLeaf lr) :: lt, (BSTNode rv BSTLeaf rr) :: rt ) ->
+                    if lv == rv then
+                        go (lr :: lt) (rr :: rt)
+
+                    else
+                        False
+
+                ( (BSTNode lv BSTLeaf lr) :: lt, (BSTNode rv ((BSTNode _ _ _) as rl) rr) :: rt ) ->
+                    go lq (rl :: BSTNode rv BSTLeaf rr :: rt)
+
+                ( (BSTNode lv ((BSTNode _ _ _) as ll) lr) :: lt, (BSTNode rv BSTLeaf rr) :: rt ) ->
+                    go (ll :: BSTNode lv BSTLeaf lr :: lq) rq
+
+                ( (BSTNode lv ((BSTNode _ _ _) as ll) lr) :: lt, (BSTNode rv ((BSTNode _ _ _) as rl) rr) :: rt ) ->
+                    go (ll :: BSTNode lv BSTLeaf lr :: rt) (rl :: BSTNode rv BSTLeaf rr :: rt)
+    in
+    go [ l ] [ r ]
