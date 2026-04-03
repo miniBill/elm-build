@@ -45,7 +45,6 @@
             "elm/virtual-dom": "1.0.5",
             "elm-community/dict-extra": "2.4.0",
             "elm-community/list-extra": "8.7.0",
-            "elm-explorations/test": "2.2.1",
             "fredcy/elm-parseint": "2.0.1",
             "jluckyiv/elm-utc-date-strings": "1.0.0",
             "justinmimbs/date": "4.1.0",
@@ -63,7 +62,9 @@
         }
     },
     "test-dependencies": {
-        "direct": {},
+        "direct": {
+            "elm-explorations/test": "2.2.1"
+        },
         "indirect": {}
     }
 }

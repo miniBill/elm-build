@@ -5,6 +5,7 @@
     "": {
       "devDependencies": {
         "elm-pages": "^3.3.4",
+        "elm-test-rs": "^3.0.2-0",
       },
     },
   },
@@ -102,6 +103,18 @@
     "@jsonjoy.com/json-pointer": ["@jsonjoy.com/json-pointer@1.0.2", "", { "dependencies": { "@jsonjoy.com/codegen": "^1.0.0", "@jsonjoy.com/util": "^1.9.0" }, "peerDependencies": { "tslib": "2" } }, "sha512-Fsn6wM2zlDzY1U+v4Nc8bo3bVqgfNTGcn6dMgs6FjrEnt4ZCe60o6ByKRjOGlI2gow0aE/Q41QOigdTqkyK5fg=="],
 
     "@jsonjoy.com/util": ["@jsonjoy.com/util@1.9.0", "", { "dependencies": { "@jsonjoy.com/buffers": "^1.0.0", "@jsonjoy.com/codegen": "^1.0.0" }, "peerDependencies": { "tslib": "2" } }, "sha512-pLuQo+VPRnN8hfPqUTLTHk126wuYdXVxE6aDmjSeV4NCAgyxWbiOIeNJVtID3h1Vzpoi9m4jXezf73I6LgabgQ=="],
+
+    "@mattpiz/elm-test-rs-darwin-arm64": ["@mattpiz/elm-test-rs-darwin-arm64@3.0.2-0", "", { "os": "darwin", "cpu": "arm64" }, "sha512-Gb1f4L09fxF1QfpatoGc41+dfepfzZn7K1eVLU9Zh/ft15vivTg3Snk611dYDo8PdEm+dZ9Xf8GkqX3NTz4BzA=="],
+
+    "@mattpiz/elm-test-rs-darwin-x64": ["@mattpiz/elm-test-rs-darwin-x64@3.0.2-0", "", { "os": "darwin", "cpu": "x64" }, "sha512-ly9pcE0sthEeLigkDdzspKEKxVxLNRN7NaDhlV3zs8beKC+AJmFz5AtGIeDIQ8hfNK6QR0xRQxgevlOTYiWbOA=="],
+
+    "@mattpiz/elm-test-rs-linux-arm": ["@mattpiz/elm-test-rs-linux-arm@3.0.2-0", "", { "os": "linux", "cpu": "arm" }, "sha512-DRjK3rsO0rb0AuCMUcLkuuSJuxpBaMobrAyH5av8MrpPh7cwjZ3RhXzCCeweuhfizH1OP/idBeVlmN8hiqA2BQ=="],
+
+    "@mattpiz/elm-test-rs-linux-arm64": ["@mattpiz/elm-test-rs-linux-arm64@3.0.2-0", "", { "os": "linux", "cpu": "arm64" }, "sha512-SpZjVmeAlBSc46Ku3RefFK4LDwsfmVgPerhFgana95dzaTYoruHNrMWUpqU9MT6FOnbJXiJQHZrI+y4VjJ5lJA=="],
+
+    "@mattpiz/elm-test-rs-linux-x64": ["@mattpiz/elm-test-rs-linux-x64@3.0.2-0", "", { "os": "linux", "cpu": "x64" }, "sha512-Ia8kayW/Aag6tEwJOEV5ZIr49KHekDYZjB/oItyYScySlRxII+VppVYmh47o6xlTz9ZO845UkEyngUMZc25Lkg=="],
+
+    "@mattpiz/elm-test-rs-win32-x64": ["@mattpiz/elm-test-rs-win32-x64@3.0.2-0", "", { "os": "win32", "cpu": "x64" }, "sha512-cxPybYCU0wXmhpc2eFTmxEvffWdXpUILlC+YnB4XG3ddTnMOIUGe6C2rK9DfT3o+9fmeq/OlroKcG5I4/cMxsQ=="],
 
     "@nodelib/fs.scandir": ["@nodelib/fs.scandir@2.1.5", "", { "dependencies": { "@nodelib/fs.stat": "2.0.5", "run-parallel": "^1.1.9" } }, "sha512-vq24Bq3ym5HEQm2NKCr3yXDwjc7vTsEThRDnkp2DK9p1uqLR+DHurm/NOTo0KG7HYHU7eppKZj3MyqYuMBf62g=="],
 
@@ -302,6 +315,8 @@
     "elm-optimize-level-2": ["elm-optimize-level-2@0.3.5", "", { "dependencies": { "@types/jest": "^27.0.3", "chalk": "^4.1.0", "commander": "^6.0.0", "node-elm-compiler": "^5.0.4", "ts-union": "^2.2.1", "typescript": "^4.5.5" }, "bin": { "elm-optimize-level-2": "bin/elm-optimize-level-2" } }, "sha512-t1xl8zR9UBspdmEMuLBE/qTLP+Ew3L4PzKLhSY/PsO21HU3jZ1ULmKxDtZmJPVG4ciqsY1JSl/GFbaSdQ1sX9Q=="],
 
     "elm-pages": ["elm-pages@3.3.4", "", { "dependencies": { "@sindresorhus/merge-streams": "^4.0.0", "busboy": "^1.6.0", "chokidar": "^5.0.0", "cli-cursor": "^5.0.0", "commander": "^14.0.3", "connect": "^3.7.0", "cookie-signature": "^1.2.2", "cross-spawn": "7.0.6", "devcert": "^1.2.3", "elm-doc-preview": "^6.0.1", "elm-hot": "^1.1.6", "elm-optimize-level-2": "^0.3.5", "esbuild": "^0.27.4", "fs-extra": "^11.3.3", "globby": "^16.2.0", "gray-matter": "^4.0.3", "jsesc": "^3.1.0", "kleur": "^4.1.5", "make-fetch-happen": "^15.0.5", "memfs": "^4.57.1", "micromatch": "^4.0.8", "serve-static": "^2.2.1", "terser": "^5.46.1", "vite": "^7.3.1", "which": "^6.0.1" }, "optionalDependencies": { "@rollup/rollup-linux-x64-gnu": "4.55.1" }, "bin": { "elm-pages": "generator/src/cli.js" } }, "sha512-j974jh6qPXkZMsRRJ0I85hzT/miM95twLWcZUeyhTme+/h6YTqMIfEgxa1Xcn+OqlcCxeyPJ/fRBLG69a+tNEQ=="],
+
+    "elm-test-rs": ["elm-test-rs@3.0.2-0", "", { "optionalDependencies": { "@mattpiz/elm-test-rs-darwin-arm64": "3.0.2-0", "@mattpiz/elm-test-rs-darwin-x64": "3.0.2-0", "@mattpiz/elm-test-rs-linux-arm": "3.0.2-0", "@mattpiz/elm-test-rs-linux-arm64": "3.0.2-0", "@mattpiz/elm-test-rs-linux-x64": "3.0.2-0", "@mattpiz/elm-test-rs-win32-x64": "3.0.2-0" }, "bin": { "elm-test-rs": "elm-test-rs.js" } }, "sha512-Rzk3PD4unWvuzdzYthUoMjFELL78oRHeYTXpF8KDp/fyHLbb+vxOzmDXHRt51ogvfKSTyiK8y0xa4F+q7lzyfQ=="],
 
     "encodeurl": ["encodeurl@2.0.0", "", {}, "sha512-Q0n9HRi4m6JuGIV1eFlmvJB7ZEVxu93IrMyiMsGC0lrMJMWzRgx6WGquyfQgZVb31vhGgXnfmPNNXmxnOkRBrg=="],
 
