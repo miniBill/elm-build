@@ -1,4 +1,4 @@
-module BackendTask.Extra exposing (combine, combineBy, combineBy_, finally, profiling, sequence, sequence_, timed)
+module BackendTask.Extra exposing (combineBy, combineBy_, finally, profiling, sequence_, timed)
 
 import Array exposing (Array)
 import BackendTask exposing (BackendTask)
@@ -120,41 +120,6 @@ combineIgnore inputs =
                     |> BackendTask.map (\_ -> ())
     in
     go 0 (Array.length arr)
-
-
-combine : List (BackendTask error a) -> BackendTask error (List a)
-combine inputs =
-    let
-        arr : Array (BackendTask error a)
-        arr =
-            Array.fromList inputs
-
-        go : Int -> Int -> BackendTask error (Rope a)
-        go fromIncluded toExcluded =
-            let
-                sliceSize : Int
-                sliceSize =
-                    toExcluded - fromIncluded
-            in
-            if sliceSize > 128 then
-                let
-                    mid : Int
-                    mid =
-                        fromIncluded + sliceSize // 2
-                in
-                BackendTask.map2 Rope.appendTo
-                    (go fromIncluded mid)
-                    (go mid toExcluded)
-
-            else
-                arr
-                    |> Array.slice fromIncluded toExcluded
-                    |> Array.toList
-                    |> BackendTask.combine
-                    |> BackendTask.map Rope.fromList
-    in
-    go 0 (Array.length arr)
-        |> BackendTask.map Rope.toList
 
 
 sequence : List (BackendTask error a) -> BackendTask error (List a)
