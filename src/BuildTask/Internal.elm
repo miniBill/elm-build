@@ -115,7 +115,7 @@ runMonad (BuildTask label m) input_ deps =
         m input_ deps
             |> BackendTask.andThen
                 (\( v, newDeps ) ->
-                    if hashSetToList (hashSetUnion deps newDeps) == hashSetToList newDeps then
+                    if hashSetEquals (hashSetUnion deps newDeps) newDeps then
                         BackendTask.succeed ( v, newDeps )
 
                     else
@@ -124,6 +124,11 @@ runMonad (BuildTask label m) input_ deps =
 
     else
         m input_ deps
+
+
+hashSetEquals : HashSet -> HashSet -> Bool
+hashSetEquals (HashSet l) (HashSet r) =
+    BST.equals l r
 
 
 {-| -}
