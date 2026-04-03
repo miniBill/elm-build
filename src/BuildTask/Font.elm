@@ -42,7 +42,6 @@ type Weight
     | WeightBold
     | WeightExtraBold -- (Ultra Bold)
     | WeightBlack -- (Heavy)
-    | WeightExtraBlack -- (Ultra Black)
 
 
 weightToNumber : Weight -> number
@@ -74,9 +73,6 @@ weightToNumber weight =
 
         WeightBlack ->
             900
-
-        WeightExtraBlack ->
-            950
 
 
 parse : FileOrDirectory -> BuildTask Data
