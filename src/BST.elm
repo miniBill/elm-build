@@ -131,7 +131,9 @@ fromList list =
     let
         arr : Array comparable
         arr =
-            Array.fromList (List.sort list)
+            List.sort list
+                |> unique
+                |> Array.fromList
 
         go fromIncluded toExcluded =
             if fromIncluded >= toExcluded then
@@ -151,3 +153,26 @@ fromList list =
                         BSTNode k (go fromIncluded mid) (go (mid + 1) toExcluded)
     in
     go 0 (Array.length arr)
+
+
+unique : List comparable -> List comparable
+unique list =
+    case list of
+        [] ->
+            []
+
+        h :: t ->
+            let
+                ( nh, nt ) =
+                    List.foldl
+                        (\e ( l, a ) ->
+                            if e == l then
+                                ( l, a )
+
+                            else
+                                ( e, l :: a )
+                        )
+                        ( h, [] )
+                        t
+            in
+            List.reverse (nh :: nt)
