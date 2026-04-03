@@ -1,4 +1,4 @@
-module Build exposing (fastHash, run, secureHash)
+module Build exposing (HashKind, fastHash, run, secureHash)
 
 import Ansi.Color
 import BackendTask exposing (BackendTask)
