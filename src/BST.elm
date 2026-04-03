@@ -180,39 +180,48 @@ unique list =
 
 equals : BST comparable -> BST comparable -> Bool
 equals l r =
-    let
-        go : List (BST comparable) -> List (BST comparable) -> Bool
-        go lq rq =
-            case ( lq, rq ) of
-                ( BSTLeaf :: lt, _ ) ->
-                    go lt rq
+    equalsHelp [ l ] [ r ]
 
-                ( _, BSTLeaf :: rt ) ->
-                    go lq rt
 
-                ( [], [] ) ->
+equalsHelp : List (BST a) -> List (BST a) -> Bool
+equalsHelp lq rq =
+    case lq of
+        BSTLeaf :: lt ->
+            equalsHelp lt rq
+
+        [] ->
+            case rq of
+                BSTLeaf :: rt ->
+                    equalsHelp lq rt
+
+                [] ->
                     True
 
-                ( [], _ ) ->
+                _ ->
                     False
 
-                ( _, [] ) ->
+        (BSTNode lv ll lr) :: lt ->
+            case rq of
+                BSTLeaf :: rt ->
+                    equalsHelp lq rt
+
+                [] ->
                     False
 
-                ( (BSTNode lv BSTLeaf lr) :: lt, (BSTNode rv BSTLeaf rr) :: rt ) ->
-                    if lv == rv then
-                        go (lr :: lt) (rr :: rt)
+                (BSTNode rv rl rr) :: rt ->
+                    case ( ll, rl ) of
+                        ( BSTLeaf, BSTLeaf ) ->
+                            if lv == rv then
+                                equalsHelp (lr :: lt) (rr :: rt)
 
-                    else
-                        False
+                            else
+                                False
 
-                ( (BSTNode lv BSTLeaf lr) :: lt, (BSTNode rv ((BSTNode _ _ _) as rl) rr) :: rt ) ->
-                    go lq (rl :: BSTNode rv BSTLeaf rr :: rt)
+                        ( BSTLeaf, BSTNode _ _ _ ) ->
+                            equalsHelp lq (rl :: BSTNode rv BSTLeaf rr :: rt)
 
-                ( (BSTNode lv ((BSTNode _ _ _) as ll) lr) :: lt, (BSTNode rv BSTLeaf rr) :: rt ) ->
-                    go (ll :: BSTNode lv BSTLeaf lr :: lt) rq
+                        ( BSTNode _ _ _, BSTLeaf ) ->
+                            equalsHelp (ll :: BSTNode lv BSTLeaf lr :: lt) rq
 
-                ( (BSTNode lv ((BSTNode _ _ _) as ll) lr) :: lt, (BSTNode rv ((BSTNode _ _ _) as rl) rr) :: rt ) ->
-                    go (ll :: BSTNode lv BSTLeaf lr :: lt) (rl :: BSTNode rv BSTLeaf rr :: rt)
-    in
-    go [ l ] [ r ]
+                        ( BSTNode _ _ _, BSTNode _ _ _ ) ->
+                            equalsHelp (ll :: BSTNode lv BSTLeaf lr :: lt) (rl :: BSTNode rv BSTLeaf rr :: rt)
