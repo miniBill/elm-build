@@ -1,4 +1,4 @@
-module Build exposing (HashKind, build, fastHash, run, secureHash)
+module Build exposing (Config, HashKind, fastHash, run, secureHash, toTask)
 
 import Ansi.Color
 import BackendTask exposing (BackendTask)
@@ -21,19 +21,7 @@ import Time
 
 run : Script
 run =
-    build
-        { getInputs = Buildfile.getInputs
-        , buildAction = Buildfile.buildAction
-        }
-
-
-build :
-    { getInputs : { inputDirectory : Path } -> BackendTask FatalError inputs
-    , buildAction : { inputDirectory : Path } -> inputs -> BuildTask FileOrDirectory
-    }
-    -> Script
-build config =
-    Script.withCliOptions (programConfig config) toTask
+    Script.withCliOptions programConfig toTask
 
 
 type alias HashKind =
@@ -66,19 +54,15 @@ secureHash =
     HashSecure
 
 
-programConfig :
-    { getInputs : { inputDirectory : Path } -> BackendTask FatalError inputs
-    , buildAction : { inputDirectory : Path } -> inputs -> BuildTask FileOrDirectory
-    }
-    -> Program.Config (Config inputs)
-programConfig { getInputs, buildAction } =
+programConfig : Program.Config (Config (List ( Path, BuildTask FileOrDirectory )))
+programConfig =
     Program.config
         |> Program.add
             (OptionsParser.build
                 (\inputDirectory ->
                     Config
-                        (getInputs { inputDirectory = inputDirectory })
-                        (buildAction { inputDirectory = inputDirectory })
+                        (Buildfile.getInputs { inputDirectory = inputDirectory })
+                        (Buildfile.buildAction { inputDirectory = inputDirectory })
                 )
                 |> OptionsParser.with
                     (Option.requiredKeywordArg "input"
