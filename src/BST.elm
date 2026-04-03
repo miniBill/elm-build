@@ -119,9 +119,9 @@ toList s =
                     acc
 
                 BSTNode k l r ->
-                    go l acc
+                    go r acc
                         |> (::) k
-                        |> go r
+                        |> go l
     in
     go s []
 
