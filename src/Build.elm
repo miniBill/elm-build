@@ -1,4 +1,4 @@
-module Build exposing (HashKind, build, fastHash, programConfig, run, secureHash)
+module Build exposing (HashKind, build, fastHash, run, secureHash)
 
 import Ansi.Color
 import BackendTask exposing (BackendTask)
@@ -21,13 +21,19 @@ import Time
 
 run : Script
 run =
-    Script.withCliOptions
-        (programConfig
-            { getInputs = Buildfile.getInputs
-            , buildAction = Buildfile.buildAction
-            }
-        )
-        build
+    build
+        { getInputs = Buildfile.getInputs
+        , buildAction = Buildfile.buildAction
+        }
+
+
+build :
+    { getInputs : { inputDirectory : Path } -> BackendTask FatalError inputs
+    , buildAction : { inputDirectory : Path } -> inputs -> BuildTask FileOrDirectory
+    }
+    -> Script
+build config =
+    Script.withCliOptions (programConfig config) toTask
 
 
 type alias HashKind =
@@ -123,8 +129,8 @@ programConfig { getInputs, buildAction } =
             )
 
 
-build : Config inputs -> BackendTask FatalError ()
-build config =
+toTask : Config inputs -> BackendTask FatalError ()
+toTask config =
     BackendTask.Extra.profiling "main" <|
         Do.do BackendTask.Time.now <| \begin ->
         Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Getting inputs") <| \_ ->
