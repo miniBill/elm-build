@@ -210,9 +210,9 @@ equals l r =
                     go lq (rl :: BSTNode rv BSTLeaf rr :: rt)
 
                 ( (BSTNode lv ((BSTNode _ _ _) as ll) lr) :: lt, (BSTNode rv BSTLeaf rr) :: rt ) ->
-                    go (ll :: BSTNode lv BSTLeaf lr :: lq) rq
+                    go (ll :: BSTNode lv BSTLeaf lr :: lt) rq
 
                 ( (BSTNode lv ((BSTNode _ _ _) as ll) lr) :: lt, (BSTNode rv ((BSTNode _ _ _) as rl) rr) :: rt ) ->
-                    go (ll :: BSTNode lv BSTLeaf lr :: rt) (rl :: BSTNode rv BSTLeaf rr :: rt)
+                    go (ll :: BSTNode lv BSTLeaf lr :: lt) (rl :: BSTNode rv BSTLeaf rr :: rt)
     in
     go [ l ] [ r ]
