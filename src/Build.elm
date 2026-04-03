@@ -98,7 +98,7 @@ programConfig =
                     )
                 |> OptionsParser.with
                     (Option.flag "debug"
-                        |> Option.withDescription "Number of parallel jobs to run"
+                        |> Option.withDescription "Output debug info"
                     )
                 |> OptionsParser.with
                     (Option.optionalKeywordArg "hash-kind"
