@@ -1,10 +1,11 @@
-module BuildTask.Unsafe exposing (commandInReadonlyDirectory, commandInWritableDirectory, commandWithFile, named, pipeThrough)
+module BuildTask.Unsafe exposing (commandInReadonlyDirectory, commandInWritableDirectory, commandWithFile, downloadImmutable, named, pipeThrough)
 
 {-| -}
 
 import BackendTask
 import BackendTask.Do as Do
 import BackendTask.Extra
+import BackendTask.Http as Http
 import BackendTask.Stream as Stream
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import BuildTask.Internal as Internal
@@ -159,3 +160,19 @@ commandWithFile cmd args hash =
     Internal.derive (String.join " " ("commandWithFile" :: cmd :: args)) outputHash <| \{ prefix, buildPath } target ->
     Do.do (Internal.commandLog prefix cmd (args ++ [ Internal.hashToPath buildPath hash ])) <| \output ->
     BackendTask.allowFatal (Script.writeFile { path = Internal.hashToPath buildPath target, body = output })
+
+
+downloadImmutable : String -> BuildTask FileOrDirectory
+downloadImmutable url =
+    BuildTask.do (Internal.stringToHash url) <| \outputHash ->
+    Internal.derive ("downloadImmutable " ++ url) outputHash <| \{ buildPath } target ->
+    Stream.http
+        { url = url
+        , method = "GET"
+        , headers = []
+        , body = Http.emptyBody
+        , retries = Nothing
+        , timeoutInMs = Nothing
+        }
+        |> Stream.pipe (Stream.fileWrite (Internal.hashToPath buildPath target))
+        |> Stream.run
