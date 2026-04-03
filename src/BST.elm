@@ -99,14 +99,14 @@ split k t =
                         ( ll, lr ) =
                             split k l
                     in
-                    ( ll, BSTNode nk lr r )
+                    ( ll, BSTNode k lr r )
 
                 GT ->
                     let
                         ( rl, rr ) =
                             split k r
                     in
-                    ( BSTNode nk l rl, rr )
+                    ( BSTNode k l rl, rr )
 
 
 toList : BST a -> List a
