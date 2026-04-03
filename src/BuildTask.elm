@@ -2,7 +2,7 @@ module BuildTask exposing
     ( FileOrDirectory, input, inputs
     , do, succeed, fail
     , writeFile, run
-    , map, map2, map3, map4, andThen, combine, combineBy, each, sequence
+    , map, map2, map3, map4, andThen, combine, combineBy, each, sequence, toResult
     , withFile
     , withPrefix, timed
     , jobs, triggerDebugger
@@ -29,7 +29,7 @@ module BuildTask exposing
 
 ## Transforming and combining `Monad` values
 
-@docs map, map2, map3, map4, andThen, combine, combineBy, each, sequence
+@docs map, map2, map3, map4, andThen, combine, combineBy, each, sequence, toResult
 
 
 ## Operations
@@ -328,3 +328,8 @@ withPrefix newPrefix m =
 jobs : BuildTask Int
 jobs =
     Internal.jobs
+
+
+toResult : BuildTask a -> BuildTask (Result FatalError a)
+toResult task =
+    Internal.toResult task

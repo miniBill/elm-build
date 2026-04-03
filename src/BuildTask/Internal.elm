@@ -1,4 +1,4 @@
-module BuildTask.Internal exposing (BuildTask(..), Hash, HashKind(..), HashSet, Input, andThen, combineBy, commandLog, derive, execLog, extendHashWith, fail, hashToPath, hashToString, hashToWorkspace, input, inputHash, jobs, map, map2, map3, map4, named, run, sequence, stringToHash, succeed, timed, triggerDebugger, withFile, withPrefix)
+module BuildTask.Internal exposing (BuildTask(..), Hash, HashKind(..), HashSet, Input, andThen, combineBy, commandLog, derive, execLog, extendHashWith, fail, hashToPath, hashToString, hashToWorkspace, input, inputHash, jobs, map, map2, map3, map4, named, run, sequence, stringToHash, succeed, timed, toResult, triggerDebugger, withFile, withPrefix)
 
 import BST exposing (BST)
 import BackendTask exposing (BackendTask)
@@ -589,3 +589,21 @@ named name encode action param =
                                     )
                     )
             )
+
+
+toResult : BuildTask a -> BuildTask (Result FatalError a)
+toResult (BuildTask name f) =
+    BuildTask name
+        (\input_ deps ->
+            f input_ deps
+                |> BackendTask.toResult
+                |> BackendTask.map
+                    (\res ->
+                        case res of
+                            Ok ( o, newDeps ) ->
+                                ( Ok o, newDeps )
+
+                            Err e ->
+                                ( Err e, deps )
+                    )
+        )
