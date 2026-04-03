@@ -67,25 +67,29 @@ programConfig =
                 |> OptionsParser.with
                     (Option.requiredKeywordArg "input"
                         |> Option.map Path.path
-                        |> Option.withDescription "Input folder"
+                        |> Option.withDisplayName "dir"
+                        |> Option.withDescription "Input directory"
                     )
                 |> OptionsParser.with
                     (Option.requiredKeywordArg "build"
                         |> Option.map Path.path
-                        |> Option.withDescription "Build folder - contains the intermediate files"
+                        |> Option.withDisplayName "dir"
+                        |> Option.withDescription "Build directory - contains the intermediate files"
                     )
                 |> OptionsParser.with
                     (Option.requiredKeywordArg "output"
                         |> Option.map Path.path
-                        |> Option.withDescription "Output folder"
+                        |> Option.withDisplayName "dir"
+                        |> Option.withDescription "Output directory"
                     )
                 |> OptionsParser.with
                     (Option.flag "remove-stale"
-                        |> Option.withDescription "Remove unused files from the build folder"
+                        |> Option.withDescription "Remove unused files from the build directory"
                     )
                 |> OptionsParser.with
                     (Option.optionalKeywordArg "jobs"
                         |> Option.withDescription "Number of parallel jobs to run"
+                        |> Option.withDisplayName "n"
                         |> Option.validateMapIfPresent
                             (\j ->
                                 case String.toInt j of
