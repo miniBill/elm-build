@@ -71,16 +71,48 @@ insertHelp k t =
 
 union : BST comparable -> BST comparable -> BST comparable
 union l r =
-    case l of
-        BSTLeaf ->
-            r
+    unionHelp 0 l r
 
-        BSTNode lk ll lr ->
-            let
-                ( rl, rr ) =
-                    split lk r
-            in
-            BSTNode lk (union ll rl) (union lr rr)
+
+unionHelp : Int -> BST comparable -> BST comparable -> BST comparable
+unionHelp budget l r =
+    if budget <= 50 then
+        fromSortedList (mergeSorted (toList l) (toList r) [])
+
+    else
+        case l of
+            BSTLeaf ->
+                r
+
+            BSTNode lk ll lr ->
+                let
+                    ( rl, rr ) =
+                        split lk r
+                in
+                BSTNode lk (unionHelp (budget - 1) ll rl) (unionHelp (budget - 1) lr rr)
+
+
+mergeSorted : List comparable -> List comparable -> List comparable -> List comparable
+mergeSorted l r acc =
+    case l of
+        [] ->
+            List.reverse (List.reverse r ++ acc)
+
+        lh :: lt ->
+            case r of
+                [] ->
+                    List.reverse (List.reverse l ++ acc)
+
+                rh :: rt ->
+                    case compare lh rh of
+                        EQ ->
+                            mergeSorted lt rt (lh :: acc)
+
+                        LT ->
+                            mergeSorted lt r (lh :: acc)
+
+                        GT ->
+                            mergeSorted l rt (rh :: acc)
 
 
 split : comparable -> BST comparable -> ( BST comparable, BST comparable )
@@ -109,6 +141,23 @@ split k t =
                     ( BSTNode k l rl, rr )
 
 
+toReverseList : BST a -> List a
+toReverseList s =
+    let
+        go : BST a -> List a -> List a
+        go t acc =
+            case t of
+                BSTLeaf ->
+                    acc
+
+                BSTNode k l r ->
+                    go l acc
+                        |> (::) k
+                        |> go r
+    in
+    go s []
+
+
 toList : BST a -> List a
 toList s =
     let
@@ -128,10 +177,15 @@ toList s =
 
 fromList : List comparable -> BST comparable
 fromList list =
+    fromSortedList (List.sort list)
+
+
+fromSortedList : List a -> BST a
+fromSortedList list =
     let
-        arr : Array comparable
+        arr : Array a
         arr =
-            List.sort list
+            list
                 |> unique
                 |> Array.fromList
 
@@ -155,7 +209,9 @@ fromList list =
     go 0 (Array.length arr)
 
 
-unique : List comparable -> List comparable
+{-| Remove duplicate elements as long as they're next to each other.
+-}
+unique : List a -> List a
 unique list =
     case list of
         [] ->
