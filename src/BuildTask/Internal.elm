@@ -1,4 +1,4 @@
-module BuildTask.Internal exposing (BuildTask(..), Input, andThen, combineBy, commandLog, derive, downloadSHA256, execLog, extendHashWith, fail, hashFromString, input, jobs, map, map2, map3, map4, named, run, sequence, succeed, timed, toResult, triggerDebugger, withFile, withPrefix)
+module BuildTask.Internal exposing (BuildTask(..), Input, andThen, combineBy, commandLog, derive, execLog, extendHashWith, fail, hashFromString, input, jobs, map, map2, map3, map4, named, run, sequence, succeed, timed, toResult, triggerDebugger, withFile, withPrefix)
 
 import BST exposing (BST)
 import BackendTask exposing (BackendTask)
@@ -10,7 +10,7 @@ import BackendTask.Http as Http
 import BackendTask.Stream as Stream
 import FNV1a
 import FatalError exposing (FatalError)
-import Hash exposing (Hash)
+import Hash exposing (Hash, Normal, Temporary)
 import HashSet exposing (HashSet)
 import Hex
 import Json.Encode
@@ -40,13 +40,13 @@ type alias Input =
 
 derive :
     String
-    -> Hash
+    -> Hash Normal
     ->
         (Input
-         -> Hash
+         -> Hash Temporary
          -> BackendTask FatalError ()
         )
-    -> BuildTask Hash
+    -> BuildTask (Hash Normal)
 derive description target inner =
     BuildTask "derive"
         (\({ existing, buildPath } as input_) deps ->
@@ -84,22 +84,22 @@ derive description target inner =
 
                 else
                     let
-                        tmp : Hash
+                        tmp : Hash Temporary
                         tmp =
-                            Hash.toTmp target
+                            Hash.toTemporary target
                     in
-                    Do.exec "rm" [ "-rf", Hash.toPath buildPath tmp ] <| \_ ->
+                    Do.exec "rm" [ "-rf", Hash.toPathTemporary buildPath tmp ] <| \_ ->
                     Do.do
                         (inner input_ tmp
                             |> BackendTask.onError
                                 (\e ->
-                                    Do.exec "rm" [ "-rf", Hash.toPath buildPath tmp ] <| \_ ->
+                                    Do.exec "rm" [ "-rf", Hash.toPathTemporary buildPath tmp ] <| \_ ->
                                     BackendTask.fail e
                                 )
                         )
                     <| \_ ->
                     Do.do
-                        (Script.exec "mv" [ Hash.toPath buildPath tmp, Hash.toPath buildPath target ]
+                        (Script.exec "mv" [ Hash.toPathTemporary buildPath tmp, Hash.toPath buildPath target ]
                             |> BackendTask.onError
                                 (\e ->
                                     Do.log ("Error inside " ++ description) <| \_ ->
@@ -219,7 +219,7 @@ andThen f m =
         )
 
 
-withFile : Hash -> (String -> BuildTask a) -> BuildTask a
+withFile : Hash Normal -> (String -> BuildTask a) -> BuildTask a
 withFile hash f =
     BuildTask "withFile"
         (\({ buildPath } as input_) deps ->
@@ -228,7 +228,7 @@ withFile hash f =
         )
 
 
-run : { jobs : Maybe Int, debug : Bool, hashKind : Hash.Kind } -> Path -> BuildTask Hash -> BackendTask FatalError { output : Path, intermediate : List Path }
+run : { jobs : Maybe Int, debug : Bool, hashKind : Hash.Kind } -> Path -> BuildTask (Hash Normal) -> BackendTask FatalError { output : Path, intermediate : List Path }
 run config buildPath m =
     Do.do (listExisting buildPath) <| \existing ->
     let
@@ -257,7 +257,15 @@ run config buildPath m =
 listExisting : Path -> BackendTask FatalError HashSet
 listExisting path =
     BackendTask.Customs.readdir path
-        |> BackendTask.map HashSet.fromList
+        |> BackendTask.andThen
+            (\list ->
+                case HashSet.fromList list of
+                    Ok o ->
+                        BackendTask.succeed o
+
+                    Err e ->
+                        BackendTask.fail (FatalError.fromString e)
+            )
 
 
 combineBy : Int -> List (BuildTask a) -> BuildTask (List a)
@@ -395,7 +403,7 @@ triggerDebugger =
         )
 
 
-input : Path -> BuildTask Hash
+input : Path -> BuildTask (Hash Normal)
 input inputPath =
     BuildTask "input"
         (\{ prefix } deps ->
@@ -410,7 +418,7 @@ input inputPath =
         |> andThen
             (\hash ->
                 derive "input" hash <| \{ prefix, buildPath } target ->
-                execLog prefix "cp" [ Path.toString inputPath, Hash.toPath buildPath target ]
+                execLog prefix "cp" [ Path.toString inputPath, Hash.toPathTemporary buildPath target ]
             )
 
 
@@ -445,10 +453,10 @@ execLog prefix cmd args =
     logCommand prefix cmd args (Script.exec cmd args)
 
 
-named : String -> (a -> { files : List Hash, additionalData : List String }) -> (a -> BuildTask Hash) -> a -> BuildTask Hash
+named : String -> (a -> { files : List (Hash Normal), additionalData : List String }) -> (a -> BuildTask (Hash Normal)) -> a -> BuildTask (Hash Normal)
 named name encode action param =
     let
-        encoded : { files : List Hash, additionalData : List String }
+        encoded : { files : List (Hash Normal), additionalData : List String }
         encoded =
             encode param
     in
@@ -477,17 +485,17 @@ named name encode action param =
             )
 
 
-extendHashWith : List String -> Hash -> BuildTask Hash
+extendHashWith : List String -> Hash Normal -> BuildTask (Hash Normal)
 extendHashWith l r =
     hashFromString (String.join "|" (Hash.toString r :: l))
 
 
-hashFromString : String -> BuildTask Hash
+hashFromString : String -> BuildTask (Hash Normal)
 hashFromString raw =
     BuildTask "fromString"
         (\{ hashKind } deps ->
             BackendTask.succeed ( Hash.fromString raw hashKind, deps )
-            )
+        )
 
 
 toResult : BuildTask a -> BuildTask (Result FatalError a)

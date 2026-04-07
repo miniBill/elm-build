@@ -1,4 +1,4 @@
-module Hash exposing (FileType(..), Hash, Kind(..), fromChecksum, fromString, toPath, toString, toTmp, toWorkspace, unsafe)
+module Hash exposing (Hash, Kind(..), Normal, Temporary, Workspace, build, fromChecksum, fromString, toInt, toPath, toPathTemporary, toPathWorkspace, toString, toTemporary, toWorkspace)
 
 import BST exposing (BST)
 import FNV1a
@@ -7,10 +7,8 @@ import Path exposing (Path)
 import Sha256
 
 
-type
-    Hash
-    --FileType Int
-    = Hash String
+type Hash k
+    = Hash Int
 
 
 type Kind
@@ -18,19 +16,26 @@ type Kind
     | Secure
 
 
-type FileType
+type Normal
     = Normal
-    | Temporary
 
 
+type Temporary
+    = Temporary
 
--- toTuple (Hash type_ i _) =
---     ( type_, i )
+
+type Workspace
+    = Workspace
+
+
+toInt : Hash k -> Int
+toInt (Hash i) =
+    i
 
 
 {-| Build an hashed file from the output of shaXsum/b3sum.
 -}
-fromChecksum : String -> Result String Hash
+fromChecksum : String -> Result String (Hash Normal)
 fromChecksum raw =
     let
         clean : String
@@ -38,48 +43,63 @@ fromChecksum raw =
             String.left 8 raw
     in
     Hex.fromString clean
-        |> Result.map (\_ -> Hash clean)
+        |> Result.map Hash
 
 
-{-| Build a hash directly without checking that it's a valid hex string.
--}
-unsafe : String -> Hash
-unsafe h =
-    Hash h
+build : Int -> Hash Normal
+build i =
+    Hash i
 
 
-toPath : Path -> Hash -> String
-toPath buildPath (Hash hash) =
-    Path.toString buildPath ++ "/" ++ hash
+toPath : Path -> Hash Normal -> String
+toPath buildPath hash =
+    Path.toString buildPath ++ "/" ++ toString hash
 
 
-toString : Hash -> String
+toPathTemporary : Path -> Hash Temporary -> String
+toPathTemporary buildPath hash =
+    Path.toString buildPath ++ "/tmp-" ++ toString hash
+
+
+toPathWorkspace : Path -> Hash Workspace -> String
+toPathWorkspace buildPath hash =
+    Path.toString buildPath ++ "/workspace-" ++ toString hash
+
+
+toString : Hash k -> String
 toString (Hash hash) =
-    hash
+    hash |> Hex.toString |> String.padLeft 8 '0'
 
 
-toTmp : Hash -> Hash
-toTmp (Hash hash) =
-    Hash ("tmp-" ++ hash)
+toTemporary : Hash Normal -> Hash Temporary
+toTemporary (Hash hash) =
+    Hash hash
 
 
-toWorkspace : Hash -> Hash
+toWorkspace : Hash Temporary -> Hash Workspace
 toWorkspace (Hash hash) =
-    Hash ("workspace-" ++ hash)
+    Hash hash
 
 
 {-| Build a hash from an arbitrary string.
 -}
-fromString : String -> Kind -> Hash
+fromString : String -> Kind -> Hash Normal
 fromString raw hashKind =
     case hashKind of
         Fast ->
             raw
                 |> FNV1a.hash
-                |> Hex.toString
-                |> String.padLeft 8 '0'
                 |> Hash
 
         Secure ->
-            Sha256.sha256 raw
-                |> Hash
+            case Hex.fromString (Sha256.sha256 raw) of
+                Ok i ->
+                    Hash i
+
+                Err _ ->
+                    let
+                        _ =
+                            -- Crash
+                            modBy 0 0
+                    in
+                    fromString raw hashKind

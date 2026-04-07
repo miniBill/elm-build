@@ -66,7 +66,7 @@ type alias BuildTask a =
 
 
 type alias FileOrDirectory =
-    Hash.Hash
+    Hash.Hash Hash.Normal
 
 
 {-| -}
@@ -158,7 +158,7 @@ inputs inputPaths =
                 Ok hash ->
                     ( inputPath
                     , Internal.derive "inputs" hash <| \{ prefix, buildPath } target ->
-                    Internal.execLog prefix "cp" [ Path.toString inputPath, Hash.toPath buildPath target ]
+                    Internal.execLog prefix "cp" [ Path.toString inputPath, Hash.toPathTemporary buildPath target ]
                     )
                         |> Ok
 
@@ -264,9 +264,9 @@ combineTree (Tree tree) =
     in
     do outputHash <| \combinedHash ->
     Internal.derive "combine" combinedHash <| \{ prefix, buildPath } target ->
-    Do.do (Internal.execLog prefix "mkdir" [ "-p", Hash.toPath buildPath target ]) <| \_ ->
+    Do.do (Internal.execLog prefix "mkdir" [ "-p", Hash.toPathTemporary buildPath target ]) <| \_ ->
     combined
-        |> Dict.foldl (\outputFilename hash acc -> Internal.execLog prefix "cp" [ "-rl", Hash.toPath buildPath hash, Hash.toPath buildPath target ++ "/" ++ outputFilename ] :: acc) []
+        |> Dict.foldl (\outputFilename hash acc -> Internal.execLog prefix "cp" [ "-rl", Hash.toPath buildPath hash, Hash.toPathTemporary buildPath target ++ "/" ++ outputFilename ] :: acc) []
         |> BackendTask.Extra.combineBy_ parallelism
 
 
@@ -287,7 +287,7 @@ writeFile : String -> BuildTask FileOrDirectory
 writeFile content =
     do (Internal.hashFromString content) <| \hash ->
     Internal.derive "writeFile" hash <| \{ buildPath } target ->
-    BackendTask.allowFatal (Script.writeFile { path = Hash.toPath buildPath target, body = content })
+    BackendTask.allowFatal (Script.writeFile { path = Hash.toPathTemporary buildPath target, body = content })
 
 
 {-| -}
