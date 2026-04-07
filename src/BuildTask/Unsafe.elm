@@ -9,6 +9,7 @@ import BackendTask.Http as Http
 import BackendTask.Stream as Stream
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import BuildTask.Internal as Internal
+import Hash
 import Pages.Script as Script
 
 
@@ -65,11 +66,11 @@ pipeThrough cmd args hash =
     BuildTask.do (Internal.extendHashWith (cmd :: args) hash) <| \outputHash ->
     Internal.derive (String.join " " ("pipeThrough" :: cmd :: args)) outputHash <| \{ prefix, buildPath } target ->
     BackendTask.Extra.timed
-        (String.join " " (prefix ++ "Piping" :: Internal.hashToPath buildPath hash :: "through" :: cmd :: args))
-        (String.join " " (prefix ++ "Piped " :: Internal.hashToPath buildPath hash :: "through" :: cmd :: args))
-        (Stream.fileRead (Internal.hashToPath buildPath hash)
+        (String.join " " (prefix ++ "Piping" :: Hash.toPath buildPath hash :: "through" :: cmd :: args))
+        (String.join " " (prefix ++ "Piped " :: Hash.toPath buildPath hash :: "through" :: cmd :: args))
+        (Stream.fileRead (Hash.toPath buildPath hash)
             |> Stream.pipe (Stream.command cmd args)
-            |> Stream.pipe (Stream.fileWrite (Internal.hashToPath buildPath target))
+            |> Stream.pipe (Stream.fileWrite (Hash.toPath buildPath target))
             |> Stream.run
         )
 
@@ -93,8 +94,8 @@ commandInReadonlyDirectory : String -> List String -> FileOrDirectory -> BuildTa
 commandInReadonlyDirectory cmd args hash =
     BuildTask.do (Internal.extendHashWith (cmd :: args) hash) <| \outputHash ->
     Internal.derive (String.join " " ("commandInReadonlyDirectory" :: cmd :: args)) outputHash <| \{ prefix, buildPath } target ->
-    Do.do (Internal.commandLog prefix cmd args |> BackendTask.inDir (Internal.hashToPath buildPath hash)) <| \output ->
-    BackendTask.allowFatal (Script.writeFile { path = Internal.hashToPath buildPath target, body = output })
+    Do.do (Internal.commandLog prefix cmd args |> BackendTask.inDir (Hash.toPath buildPath hash)) <| \output ->
+    BackendTask.allowFatal (Script.writeFile { path = Hash.toPath buildPath target, body = output })
 
 
 {-| Run a command in a writable temporary directory seeded from a cached directory.
@@ -122,10 +123,10 @@ commandInWritableDirectory cmd args hash =
     let
         workspacePath : String
         workspacePath =
-            Internal.hashToPath buildPath (Internal.hashToWorkspace target)
+            Hash.toPath buildPath (Hash.toWorkspace target)
     in
     Do.exec "rm" [ "-rf", workspacePath ] <| \_ ->
-    Do.exec "cp" [ "-r", Internal.hashToPath buildPath hash, workspacePath ] <| \_ ->
+    Do.exec "cp" [ "-r", Hash.toPath buildPath hash, workspacePath ] <| \_ ->
     Do.exec "chmod" [ "-R", "u+w", workspacePath ] <| \_ ->
     Do.do
         (Internal.commandLog prefix cmd args
@@ -134,7 +135,7 @@ commandInWritableDirectory cmd args hash =
                 (Script.exec "rm" [ "-rf", workspacePath ])
         )
     <| \output ->
-    BackendTask.allowFatal (Script.writeFile { path = Internal.hashToPath buildPath target, body = output })
+    BackendTask.allowFatal (Script.writeFile { path = Hash.toPath buildPath target, body = output })
 
 
 {-| Run a command passing in a file (or directory) as last argument and save the result to a file.
@@ -158,13 +159,13 @@ commandWithFile :
 commandWithFile cmd args hash =
     BuildTask.do (Internal.extendHashWith (cmd :: args) hash) <| \outputHash ->
     Internal.derive (String.join " " ("commandWithFile" :: cmd :: args)) outputHash <| \{ prefix, buildPath } target ->
-    Do.do (Internal.commandLog prefix cmd (args ++ [ Internal.hashToPath buildPath hash ])) <| \output ->
-    BackendTask.allowFatal (Script.writeFile { path = Internal.hashToPath buildPath target, body = output })
+    Do.do (Internal.commandLog prefix cmd (args ++ [ Hash.toPath buildPath hash ])) <| \output ->
+    BackendTask.allowFatal (Script.writeFile { path = Hash.toPath buildPath target, body = output })
 
 
 downloadImmutable : String -> BuildTask FileOrDirectory
 downloadImmutable url =
-    BuildTask.do (Internal.stringToHash url) <| \outputHash ->
+    BuildTask.do (Internal.hashFromString url) <| \outputHash ->
     Internal.derive ("downloadImmutable " ++ url) outputHash <| \{ buildPath } target ->
     Stream.http
         { url = url
@@ -174,5 +175,5 @@ downloadImmutable url =
         , retries = Nothing
         , timeoutInMs = Nothing
         }
-        |> Stream.pipe (Stream.fileWrite (Internal.hashToPath buildPath target))
+        |> Stream.pipe (Stream.fileWrite (Hash.toPath buildPath target))
         |> Stream.run

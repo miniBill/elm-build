@@ -7,12 +7,13 @@ import BackendTask.Do as Do
 import BackendTask.Extra
 import BackendTask.Time
 import BuildTask exposing (BuildTask, FileOrDirectory)
-import BuildTask.Internal as Internal exposing (HashKind(..))
+import BuildTask.Internal as Internal
 import Buildfile
 import Cli.Option as Option
 import Cli.OptionsParser as OptionsParser
 import Cli.Program as Program
 import FatalError exposing (FatalError)
+import Hash
 import Pages.Script as Script exposing (Script)
 import Path exposing (Path)
 import Set exposing (Set)
@@ -25,7 +26,7 @@ run =
 
 
 type alias HashKind =
-    Internal.HashKind
+    Hash.Kind
 
 
 type alias Config inputs =
@@ -44,14 +45,14 @@ type alias Config inputs =
 -}
 fastHash : HashKind
 fastHash =
-    HashFast
+    Hash.Fast
 
 
 {-| Use SHA256 for hashing. Suitable for a CI environment.
 -}
 secureHash : HashKind
 secureHash =
-    HashSecure
+    Hash.Secure
 
 
 programConfig : Program.Config (Config (List ( Path, BuildTask FileOrDirectory )))
@@ -108,7 +109,7 @@ programConfig =
                     (Option.optionalKeywordArg "hash-kind"
                         |> Option.withDescription "Kind of hash to use. Choose fast for FNV1a, secure for sha256."
                         |> Option.withDefault "fast"
-                        |> Option.oneOf [ ( "fast", HashFast ), ( "secure", HashSecure ) ]
+                        |> Option.oneOf [ ( "fast", Hash.Fast ), ( "secure", Hash.Secure ) ]
                     )
             )
 

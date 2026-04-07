@@ -51,9 +51,10 @@ module BuildTask exposing
 import BackendTask exposing (BackendTask)
 import BackendTask.Do as Do
 import BackendTask.Extra
-import BuildTask.Internal as Internal exposing (HashKind)
+import BuildTask.Internal as Internal
 import FastDict as Dict exposing (Dict)
 import FatalError exposing (FatalError)
+import Hash
 import Pages.Script as Script
 import Path exposing (Path)
 import Result.Extra
@@ -65,7 +66,7 @@ type alias BuildTask a =
 
 
 type alias FileOrDirectory =
-    Internal.Hash
+    Hash.Hash
 
 
 {-| -}
@@ -153,11 +154,11 @@ inputs inputPaths =
     Do.do (Internal.commandLog [] "b3sum" (List.map Path.toString inputPaths)) <| \body ->
     List.map2
         (\inputPath line ->
-            case Internal.inputHash line of
+            case Hash.fromChecksum line of
                 Ok hash ->
                     ( inputPath
                     , Internal.derive "inputs" hash <| \{ prefix, buildPath } target ->
-                    Internal.execLog prefix "cp" [ Path.toString inputPath, Internal.hashToPath buildPath target ]
+                    Internal.execLog prefix "cp" [ Path.toString inputPath, Hash.toPath buildPath target ]
                     )
                         |> Ok
 
@@ -255,17 +256,17 @@ combineTree (Tree tree) =
         outputHash : BuildTask FileOrDirectory
         outputHash =
             Dict.foldl
-                (\filename hash acc -> filename :: Internal.hashToString hash :: acc)
+                (\filename hash acc -> filename :: Hash.toString hash :: acc)
                 [ "combineTree" ]
                 combined
                 |> String.join "|"
-                |> Internal.stringToHash
+                |> Internal.hashFromString
     in
     do outputHash <| \combinedHash ->
     Internal.derive "combine" combinedHash <| \{ prefix, buildPath } target ->
-    Do.do (Internal.execLog prefix "mkdir" [ "-p", Internal.hashToPath buildPath target ]) <| \_ ->
+    Do.do (Internal.execLog prefix "mkdir" [ "-p", Hash.toPath buildPath target ]) <| \_ ->
     combined
-        |> Dict.foldl (\outputFilename hash acc -> Internal.execLog prefix "cp" [ "-rl", Internal.hashToPath buildPath hash, Internal.hashToPath buildPath target ++ "/" ++ outputFilename ] :: acc) []
+        |> Dict.foldl (\outputFilename hash acc -> Internal.execLog prefix "cp" [ "-rl", Hash.toPath buildPath hash, Hash.toPath buildPath target ++ "/" ++ outputFilename ] :: acc) []
         |> BackendTask.Extra.combineBy_ parallelism
 
 
@@ -284,13 +285,13 @@ withFile hash f =
 {-| -}
 writeFile : String -> BuildTask FileOrDirectory
 writeFile content =
-    do (Internal.stringToHash content) <| \hash ->
+    do (Internal.hashFromString content) <| \hash ->
     Internal.derive "writeFile" hash <| \{ buildPath } target ->
-    BackendTask.allowFatal (Script.writeFile { path = Internal.hashToPath buildPath target, body = content })
+    BackendTask.allowFatal (Script.writeFile { path = Hash.toPath buildPath target, body = content })
 
 
 {-| -}
-run : { jobs : Maybe Int, debug : Bool, hashKind : HashKind } -> Path -> BuildTask FileOrDirectory -> BackendTask FatalError { output : Path, intermediate : List Path }
+run : { jobs : Maybe Int, debug : Bool, hashKind : Hash.Kind } -> Path -> BuildTask FileOrDirectory -> BackendTask FatalError { output : Path, intermediate : List Path }
 run config buildPath m =
     Internal.run config buildPath m
 

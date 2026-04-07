@@ -1,4 +1,4 @@
-module BuildTask.Internal exposing (BuildTask(..), Hash, HashKind(..), HashSet, Input, andThen, combineBy, commandLog, derive, execLog, extendHashWith, fail, hashToPath, hashToString, hashToWorkspace, input, inputHash, jobs, map, map2, map3, map4, named, run, sequence, stringToHash, succeed, timed, toResult, triggerDebugger, withFile, withPrefix)
+module BuildTask.Internal exposing (BuildTask(..), Input, andThen, combineBy, commandLog, derive, downloadSHA256, execLog, extendHashWith, fail, hashFromString, input, jobs, map, map2, map3, map4, named, run, sequence, succeed, timed, toResult, triggerDebugger, withFile, withPrefix)
 
 import BST exposing (BST)
 import BackendTask exposing (BackendTask)
@@ -6,9 +6,12 @@ import BackendTask.Customs
 import BackendTask.Do as Do
 import BackendTask.Extra
 import BackendTask.File as File
+import BackendTask.Http as Http
 import BackendTask.Stream as Stream
 import FNV1a
 import FatalError exposing (FatalError)
+import Hash exposing (Hash)
+import HashSet exposing (HashSet)
 import Hex
 import Json.Encode
 import Pages.Script as Script
@@ -31,7 +34,7 @@ type alias Input =
     , buildPath : Path
     , jobs : Maybe Int
     , debug : Bool
-    , hashKind : HashKind
+    , hashKind : Hash.Kind
     }
 
 
@@ -50,18 +53,18 @@ derive description target inner =
             let
                 newDeps : HashSet
                 newDeps =
-                    hashSetInsert target deps
+                    HashSet.insert target deps
 
                 appendLog : BackendTask FatalError ()
                 appendLog =
                     if input_.debug then
-                        (hashToPath buildPath target
+                        (Hash.toPath buildPath target
                             ++ ": "
                             ++ description
                          -- ++ " from "
                          -- ++ (deps
-                         --         |> hashSetToList
-                         --         |> List.map (hashToPath buildPath)
+                         --         |> HashSet.toList
+                         --         |> List.map (Hash.hashToPath buildPath)
                          --         |> String.join ", "
                          --    )
                         )
@@ -71,11 +74,11 @@ derive description target inner =
                         BackendTask.succeed ()
             in
             Do.do appendLog <| \_ ->
-            if hashSetMember target existing || hashSetMember target deps then
+            if HashSet.member target existing || HashSet.member target deps then
                 BackendTask.succeed ( target, newDeps )
 
             else
-                Do.do (File.exists (hashToPath buildPath target)) <| \exists ->
+                Do.do (File.exists (Hash.toPath buildPath target)) <| \exists ->
                 if exists then
                     BackendTask.succeed ( target, newDeps )
 
@@ -83,20 +86,20 @@ derive description target inner =
                     let
                         tmp : Hash
                         tmp =
-                            hashToTmp target
+                            Hash.toTmp target
                     in
-                    Do.exec "rm" [ "-rf", hashToPath buildPath tmp ] <| \_ ->
+                    Do.exec "rm" [ "-rf", Hash.toPath buildPath tmp ] <| \_ ->
                     Do.do
                         (inner input_ tmp
                             |> BackendTask.onError
                                 (\e ->
-                                    Do.exec "rm" [ "-rf", hashToPath buildPath tmp ] <| \_ ->
+                                    Do.exec "rm" [ "-rf", Hash.toPath buildPath tmp ] <| \_ ->
                                     BackendTask.fail e
                                 )
                         )
                     <| \_ ->
                     Do.do
-                        (Script.exec "mv" [ hashToPath buildPath tmp, hashToPath buildPath target ]
+                        (Script.exec "mv" [ Hash.toPath buildPath tmp, Hash.toPath buildPath target ]
                             |> BackendTask.onError
                                 (\e ->
                                     Do.log ("Error inside " ++ description) <| \_ ->
@@ -104,7 +107,7 @@ derive description target inner =
                                 )
                         )
                     <| \_ ->
-                    Do.exec "chmod" [ "-R", "a=rX", hashToPath buildPath target ] <| \_ ->
+                    Do.exec "chmod" [ "-R", "a=rX", Hash.toPath buildPath target ] <| \_ ->
                     BackendTask.succeed ( target, newDeps )
         )
 
@@ -115,7 +118,7 @@ runMonad (BuildTask label m) input_ deps =
         m input_ deps
             |> BackendTask.andThen
                 (\( v, newDeps ) ->
-                    if hashSetEquals (hashSetUnion deps newDeps) newDeps then
+                    if HashSet.equals (HashSet.union deps newDeps) newDeps then
                         BackendTask.succeed ( v, newDeps )
 
                     else
@@ -124,11 +127,6 @@ runMonad (BuildTask label m) input_ deps =
 
     else
         m input_ deps
-
-
-hashSetEquals : HashSet -> HashSet -> Bool
-hashSetEquals (HashSet l) (HashSet r) =
-    BST.equals l r
 
 
 {-| -}
@@ -155,7 +153,7 @@ map2 f a b =
         (\input_ deps ->
             BackendTask.map2
                 (\( va, depsA ) ( vb, depsB ) ->
-                    ( f va vb, hashSetUnion depsA depsB )
+                    ( f va vb, HashSet.union depsA depsB )
                 )
                 (runMonad a input_ deps)
                 (runMonad b input_ deps)
@@ -174,7 +172,7 @@ map3 f a b c =
         (\input_ deps ->
             BackendTask.map3
                 (\( va, depsA ) ( vb, depsB ) ( vc, depsC ) ->
-                    ( f va vb vc, hashSetUnion depsA depsB |> hashSetUnion depsC )
+                    ( f va vb vc, HashSet.union depsA depsB |> HashSet.union depsC )
                 )
                 (runMonad a input_ deps)
                 (runMonad b input_ deps)
@@ -196,9 +194,9 @@ map4 f a b c d =
             BackendTask.map4
                 (\( va, depsA ) ( vb, depsB ) ( vc, depsC ) ( vd, depsD ) ->
                     ( f va vb vc vd
-                    , hashSetUnion
-                        (hashSetUnion depsA depsB)
-                        (hashSetUnion depsC depsD)
+                    , HashSet.union
+                        (HashSet.union depsA depsB)
+                        (HashSet.union depsC depsD)
                     )
                 )
                 (runMonad a input_ deps)
@@ -225,12 +223,12 @@ withFile : Hash -> (String -> BuildTask a) -> BuildTask a
 withFile hash f =
     BuildTask "withFile"
         (\({ buildPath } as input_) deps ->
-            Do.allowFatal (File.rawFile (hashToPath buildPath hash)) <| \raw ->
-            runMonad (f raw) input_ (hashSetInsert hash deps)
+            Do.allowFatal (File.rawFile (Hash.toPath buildPath hash)) <| \raw ->
+            runMonad (f raw) input_ (HashSet.insert hash deps)
         )
 
 
-run : { jobs : Maybe Int, debug : Bool, hashKind : HashKind } -> Path -> BuildTask Hash -> BackendTask FatalError { output : Path, intermediate : List Path }
+run : { jobs : Maybe Int, debug : Bool, hashKind : Hash.Kind } -> Path -> BuildTask Hash -> BackendTask FatalError { output : Path, intermediate : List Path }
 run config buildPath m =
     Do.do (listExisting buildPath) <| \existing ->
     let
@@ -244,14 +242,14 @@ run config buildPath m =
             , hashKind = config.hashKind
             }
     in
-    runMonad m input_ hashSetEmpty
+    runMonad m input_ HashSet.empty
         |> BackendTask.map
             (\( output, deps ) ->
-                { output = Path.path (hashToPath buildPath output)
+                { output = Path.path (Hash.toPath buildPath output)
                 , intermediate =
                     deps
-                        |> hashSetToList
-                        |> List.map (\raw -> raw |> hashToPath buildPath |> Path.path)
+                        |> HashSet.toList
+                        |> List.map (\raw -> raw |> Hash.toPath buildPath |> Path.path)
                 }
             )
 
@@ -259,7 +257,7 @@ run config buildPath m =
 listExisting : Path -> BackendTask FatalError HashSet
 listExisting path =
     BackendTask.Customs.readdir path
-        |> BackendTask.map hashSetFromList
+        |> BackendTask.map HashSet.fromList
 
 
 combineBy : Int -> List (BuildTask a) -> BuildTask (List a)
@@ -281,9 +279,9 @@ combineBy n ops =
                                     |> List.sortBy (\( i, _ ) -> -i)
                                     |> List.foldl
                                         (\( _, ( res, newDeps ) ) ( resAcc, depsAcc ) ->
-                                            ( res :: resAcc, hashSetUnion newDeps depsAcc )
+                                            ( res :: resAcc, HashSet.union newDeps depsAcc )
                                         )
-                                        ( [], hashSetEmpty )
+                                        ( [], HashSet.empty )
                             )
         )
 
@@ -303,7 +301,7 @@ sequence ops =
                         (\res ->
                             res
                                 |> List.unzip
-                                |> Tuple.mapSecond (List.foldl hashSetUnion hashSetEmpty)
+                                |> Tuple.mapSecond (List.foldl HashSet.union HashSet.empty)
                         )
         )
 
@@ -402,7 +400,7 @@ input inputPath =
     BuildTask "input"
         (\{ prefix } deps ->
             Do.do (commandLog prefix "b3sum" [ Path.toString inputPath ]) <| \body ->
-            case inputHash body of
+            case Hash.fromChecksum body of
                 Err e ->
                     BackendTask.fail (FatalError.fromString e)
 
@@ -412,7 +410,7 @@ input inputPath =
         |> andThen
             (\hash ->
                 derive "input" hash <| \{ prefix, buildPath } target ->
-                execLog prefix "cp" [ Path.toString inputPath, hashToPath buildPath target ]
+                execLog prefix "cp" [ Path.toString inputPath, Hash.toPath buildPath target ]
             )
 
 
@@ -447,118 +445,6 @@ execLog prefix cmd args =
     logCommand prefix cmd args (Script.exec cmd args)
 
 
-
-------------
--- HASHES --
-------------
-
-
-type HashKind
-    = HashFast
-    | HashSecure
-
-
-{-| -}
-type Hash
-    = Hash String
-
-
-{-| Build an hashed file from the output of shaXsum/b3sum.
--}
-inputHash : String -> Result String Hash
-inputHash raw =
-    let
-        clean : String
-        clean =
-            String.left 8 raw
-    in
-    Hex.fromString clean
-        |> Result.map (\_ -> Hash clean)
-
-
-hashToPath : Path -> Hash -> String
-hashToPath buildPath (Hash hash) =
-    Path.toString buildPath ++ "/" ++ hash
-
-
-hashToString : Hash -> String
-hashToString (Hash hash) =
-    hash
-
-
-hashToTmp : Hash -> Hash
-hashToTmp (Hash hash) =
-    Hash ("tmp-" ++ hash)
-
-
-hashToWorkspace : Hash -> Hash
-hashToWorkspace (Hash hash) =
-    Hash ("workspace-" ++ hash)
-
-
-extendHashWith : List String -> Hash -> BuildTask Hash
-extendHashWith l (Hash r) =
-    stringToHash (String.join "|" (r :: l))
-
-
-stringToHash : String -> BuildTask Hash
-stringToHash raw =
-    BuildTask "stringToHash"
-        (\{ hashKind } deps ->
-            let
-                hash : String
-                hash =
-                    case hashKind of
-                        HashFast ->
-                            raw
-                                |> FNV1a.hash
-                                |> Hex.toString
-                                |> String.padLeft 8 '0'
-
-                        HashSecure ->
-                            Sha256.sha256 raw
-            in
-            BackendTask.succeed ( Hash hash, deps )
-        )
-
-
-type HashSet
-    = HashSet (BST String)
-
-
-hashSetEmpty : HashSet
-hashSetEmpty =
-    HashSet BST.empty
-
-
-hashSetMember : Hash -> HashSet -> Bool
-hashSetMember (Hash x) (HashSet s) =
-    BST.member x s
-
-
-hashSetInsert : Hash -> HashSet -> HashSet
-hashSetInsert (Hash x) (HashSet s) =
-    HashSet (BST.insert x s)
-
-
-hashSetUnion : HashSet -> HashSet -> HashSet
-hashSetUnion (HashSet a) (HashSet b) =
-    HashSet (BST.union a b)
-
-
-hashSetToList : HashSet -> List Hash
-hashSetToList (HashSet s) =
-    BST.toList s
-        |> List.map Hash
-
-
-hashSetFromList : List String -> HashSet
-hashSetFromList list =
-    list
-        |> BST.fromList
-        |> HashSet
-
-
 named : String -> (a -> { files : List Hash, additionalData : List String }) -> (a -> BuildTask Hash) -> a -> BuildTask Hash
 named name encode action param =
     let
@@ -566,28 +452,41 @@ named name encode action param =
         encoded =
             encode param
     in
-    (name :: encoded.additionalData ++ List.map hashToString encoded.files)
+    (name :: encoded.additionalData ++ List.map Hash.toString encoded.files)
         |> String.join "|"
-        |> stringToHash
+        |> hashFromString
         |> andThen
             (\hash ->
                 BuildTask "named"
                     (\input_ deps ->
-                        if hashSetMember hash input_.existing || hashSetMember hash deps then
-                            BackendTask.succeed ( hash, hashSetInsert hash deps )
+                        if HashSet.member hash input_.existing || HashSet.member hash deps then
+                            BackendTask.succeed ( hash, HashSet.insert hash deps )
 
                         else
                             runMonad (action param) input_ deps
                                 |> BackendTask.andThen
                                     (\( actionOutput, newDeps ) ->
                                         Do.exec "mv"
-                                            [ hashToPath input_.buildPath actionOutput
-                                            , hashToPath input_.buildPath hash
+                                            [ Hash.toPath input_.buildPath actionOutput
+                                            , Hash.toPath input_.buildPath hash
                                             ]
                                         <| \_ ->
-                                        BackendTask.succeed ( hash, hashSetInsert hash newDeps )
+                                        BackendTask.succeed ( hash, HashSet.insert hash newDeps )
                                     )
                     )
+            )
+
+
+extendHashWith : List String -> Hash -> BuildTask Hash
+extendHashWith l r =
+    hashFromString (String.join "|" (Hash.toString r :: l))
+
+
+hashFromString : String -> BuildTask Hash
+hashFromString raw =
+    BuildTask "fromString"
+        (\{ hashKind } deps ->
+            BackendTask.succeed ( Hash.fromString raw hashKind, deps )
             )
 
 
