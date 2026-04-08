@@ -147,16 +147,16 @@ toList s =
 
 
 toListHelp : BST a -> List a -> List a
-        toListHelp t acc =
-            case t of
-                BSTLeaf ->
-                    acc
+toListHelp t acc =
+    case t of
+        BSTLeaf ->
+            acc
 
-                BSTNode k l r ->
-                    toListHelp r acc
-                        |> (::) k
-                        |> toListHelp l
-    
+        BSTNode k l r ->
+            toListHelp r acc
+                |> (::) k
+                |> toListHelp l
+
 
 fromList : List comparable -> BST comparable
 fromList list =
