@@ -7,7 +7,6 @@ import BackendTask.Do as Do
 import BackendTask.Extra
 import BackendTask.Time
 import BuildTask exposing (BuildTask, FileOrDirectory)
-import BuildTask.Internal as Internal
 import Buildfile
 import Cli.Option as Option
 import Cli.OptionsParser as OptionsParser

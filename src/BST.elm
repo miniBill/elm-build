@@ -141,23 +141,6 @@ split k t =
                     ( BSTNode k l rl, rr )
 
 
-toReverseList : BST a -> List a
-toReverseList s =
-    let
-        go : BST a -> List a -> List a
-        go t acc =
-            case t of
-                BSTLeaf ->
-                    acc
-
-                BSTNode k l r ->
-                    go l acc
-                        |> (::) k
-                        |> go r
-    in
-    go s []
-
-
 toList : BST a -> List a
 toList s =
     let

@@ -1,6 +1,5 @@
 module Hash exposing (Hash, Kind(..), Normal, Temporary, Workspace, build, fromChecksum, fromString, toInt, toPath, toPathTemporary, toPathWorkspace, toString, toTemporary, toWorkspace)
 
-import BST exposing (BST)
 import FNV1a
 import Hex
 import Path exposing (Path)

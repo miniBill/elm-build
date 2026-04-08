@@ -54,7 +54,7 @@ import BackendTask.Extra
 import BuildTask.Internal as Internal
 import FastDict as Dict exposing (Dict)
 import FatalError exposing (FatalError)
-import Hash
+import Hash exposing (Hash)
 import Pages.Script as Script
 import Path exposing (Path)
 import Result.Extra
@@ -66,7 +66,7 @@ type alias BuildTask a =
 
 
 type alias FileOrDirectory =
-    Hash.Hash Hash.Normal
+    Hash Hash.Normal
 
 
 {-| -}

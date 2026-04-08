@@ -1,10 +1,10 @@
 module BSTTest exposing (equal, toFromList)
 
 import BST exposing (BST)
-import Expect exposing (Expectation)
-import Fuzz exposing (Fuzzer, int, list, string)
+import Expect
+import Fuzz exposing (Fuzzer)
 import Set
-import Test exposing (Test, fuzz, test)
+import Test exposing (Test)
 
 
 toFromList : Test

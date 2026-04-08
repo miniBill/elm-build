@@ -1,6 +1,5 @@
 module BuildTask.Internal exposing (BuildTask(..), Input, andThen, combineBy, commandLog, derive, execLog, extendHashWith, fail, hashFromString, input, jobs, map, map2, map3, map4, named, run, sequence, succeed, timed, toResult, triggerDebugger, withFile, withPrefix)
 
-import BST exposing (BST)
 import BackendTask exposing (BackendTask)
 import BackendTask.Customs
 import BackendTask.Do as Do
@@ -8,7 +7,6 @@ import BackendTask.Extra
 import BackendTask.File as File
 import BackendTask.Http as Http
 import BackendTask.Stream as Stream
-import FNV1a
 import FatalError exposing (FatalError)
 import Hash exposing (Hash, Normal, Temporary)
 import HashSet exposing (HashSet)
@@ -16,7 +14,6 @@ import Hex
 import Json.Encode
 import Pages.Script as Script
 import Path exposing (Path)
-import Sha256
 
 
 type BuildTask a
