@@ -171,25 +171,29 @@ fromSortedList list =
             list
                 |> unique
                 |> Array.fromList
+    in
+    fromSortedListHelp 0 (Array.length arr) arr
 
-        go fromIncluded toExcluded =
-            if fromIncluded >= toExcluded then
+
+fromSortedListHelp : Int -> Int -> Array a -> BST a
+fromSortedListHelp fromIncluded toExcluded arr =
+    if fromIncluded >= toExcluded then
+        BSTLeaf
+
+    else
+        let
+            mid : Int
+            mid =
+                fromIncluded + (toExcluded - fromIncluded) // 2
+        in
+        case Array.get mid arr of
+            Nothing ->
                 BSTLeaf
 
-            else
-                let
-                    mid : Int
-                    mid =
-                        fromIncluded + (toExcluded - fromIncluded) // 2
-                in
-                case Array.get mid arr of
-                    Nothing ->
-                        BSTLeaf
-
-                    Just k ->
-                        BSTNode k (go fromIncluded mid) (go (mid + 1) toExcluded)
-    in
-    go 0 (Array.length arr)
+            Just k ->
+                BSTNode k
+                    (fromSortedListHelp fromIncluded mid arr)
+                    (fromSortedListHelp (mid + 1) toExcluded arr)
 
 
 {-| Remove duplicate elements as long as they're next to each other.
