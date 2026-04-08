@@ -29,7 +29,7 @@ type alias Input =
     { existing : HashSet
     , prefix : List String
     , buildPath : Path
-    , jobs : Maybe Int
+    , jobs : Int
     , debug : Bool
     , hashKind : Hash.Kind
     }
@@ -228,13 +228,22 @@ withFile hash f =
 run : { jobs : Maybe Int, debug : Bool, hashKind : Hash.Kind } -> Path -> BuildTask (Hash Normal) -> BackendTask FatalError { output : Path, intermediate : List Path }
 run config buildPath m =
     Do.do (listExisting buildPath) <| \existing ->
+    Do.do
+        (case config.jobs of
+            Nothing ->
+                nproc
+
+            Just j ->
+                BackendTask.succeed j
+        )
+    <| \jobs_ ->
     let
         input_ : Input
         input_ =
             { existing = existing
             , prefix = []
             , buildPath = buildPath
-            , jobs = config.jobs
+            , jobs = jobs_
             , debug = config.debug
             , hashKind = config.hashKind
             }
@@ -323,6 +332,11 @@ withPrefix newPrefix m =
 
 jobs : BuildTask Int
 jobs =
+    BuildTask "jobs" (\input_ deps -> BackendTask.succeed ( input_.jobs, deps ))
+
+
+nproc : BackendTask FatalError Int
+nproc =
     let
         tryRunningOrElse :
             String
@@ -353,27 +367,14 @@ jobs =
                 Err _ ->
                     orElse ()
     in
-    BuildTask "jobs"
-        (\input_ deps ->
-            let
-                task : BackendTask FatalError Int
-                task =
-                    case input_.jobs of
-                        Just j ->
-                            BackendTask.succeed j
-
-                        Nothing ->
-                            tryRunningOrElse "nproc" [ "--all" ] <| \_ ->
-                            tryRunningOrElse "sysctl" [ "-n", "hw.logicalcpu" ] <| \_ ->
-                            let
-                                message : String
-                                message =
-                                    "Failed to run either `nproc --all` or `sysctl -n hw.logicalcpu`. You can work around this by specifying an explicit number of jobs to run in parallel"
-                            in
-                            BackendTask.fail (FatalError.fromString message)
-            in
-            task |> BackendTask.map (\j -> ( j, deps ))
-        )
+    tryRunningOrElse "nproc" [ "--all" ] <| \_ ->
+    tryRunningOrElse "sysctl" [ "-n", "hw.logicalcpu" ] <| \_ ->
+    let
+        message : String
+        message =
+            "Failed to run either `nproc --all` or `sysctl -n hw.logicalcpu`. You can work around this by specifying an explicit number of jobs to run in parallel"
+    in
+    BackendTask.fail (FatalError.fromString message)
 
 
 succeed : a -> BuildTask a
