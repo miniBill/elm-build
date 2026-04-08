@@ -145,7 +145,7 @@ sequence inputs =
                 go fromIncluded mid
                     |> BackendTask.andThen
                         (\b ->
-                            BackendTask.map (Rope.prependTo b)
+                            BackendTask.map (Rope.appendTo b)
                                 (go mid toExcluded)
                         )
 

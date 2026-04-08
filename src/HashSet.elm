@@ -1,4 +1,4 @@
-module HashSet exposing (HashSet, empty, equals, fromList, insert, member, toList, union)
+module HashSet exposing (HashSet, empty, equals, fromList, insert, member, toList, union, unionAll)
 
 import BST exposing (BST)
 import Hash exposing (Hash, Normal)
@@ -53,3 +53,11 @@ fromList list =
 equals : HashSet -> HashSet -> Bool
 equals (HashSet l) (HashSet r) =
     BST.equals l r
+
+
+unionAll : List HashSet -> HashSet
+unionAll sets =
+    sets
+        |> List.map (\(HashSet h) -> h)
+        |> BST.unionAll
+        |> HashSet

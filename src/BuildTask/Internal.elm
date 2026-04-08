@@ -293,9 +293,10 @@ combineBy n ops =
                                     |> List.sortBy (\( i, _ ) -> -i)
                                     |> List.foldl
                                         (\( _, ( res, newDeps ) ) ( resAcc, depsAcc ) ->
-                                            ( res :: resAcc, HashSet.union newDeps depsAcc )
+                                            ( res :: resAcc, newDeps :: depsAcc )
                                         )
-                                        ( [], HashSet.empty )
+                                        ( [], [] )
+                                    |> Tuple.mapSecond HashSet.unionAll
                             )
         )
 

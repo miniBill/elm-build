@@ -1,4 +1,4 @@
-module BST exposing (BST, empty, equals, fromList, insert, member, toList, union)
+module BST exposing (BST, empty, equals, fromList, insert, member, toList, union, unionAll)
 
 import Array exposing (Array)
 
@@ -143,20 +143,20 @@ split k t =
 
 toList : BST a -> List a
 toList s =
-    let
-        go : BST a -> List a -> List a
-        go t acc =
+    toListHelp s []
+
+
+toListHelp : BST a -> List a -> List a
+        toListHelp t acc =
             case t of
                 BSTLeaf ->
                     acc
 
                 BSTNode k l r ->
-                    go r acc
+                    toListHelp r acc
                         |> (::) k
-                        |> go l
-    in
-    go s []
-
+                        |> toListHelp l
+    
 
 fromList : List comparable -> BST comparable
 fromList list =
@@ -264,3 +264,38 @@ equalsHelp lq rq =
 
                         ( BSTNode _ _ _, BSTNode _ _ _ ) ->
                             equalsHelp (ll :: BSTNode lv BSTLeaf lr :: lt) (rl :: BSTNode rv BSTLeaf rr :: rt)
+
+
+unionAll : List (BST comparable) -> BST comparable
+unionAll list =
+    let
+        array : Array (BST comparable)
+        array =
+            Array.fromList list
+    in
+    unionAllHelp 0 (Array.length array) array
+
+
+unionAllHelp : Int -> Int -> Array (BST comparable) -> BST comparable
+unionAllHelp from to arr =
+    if to < from then
+        empty
+
+    else if to == from + 1 then
+        Array.get from arr |> Maybe.withDefault empty
+
+    else
+        let
+            mid : Int
+            mid =
+                from + (to - from) // 2
+
+            l : BST comparable
+            l =
+                unionAllHelp from mid arr
+
+            r : BST comparable
+            r =
+                unionAllHelp mid to arr
+        in
+        union l r
