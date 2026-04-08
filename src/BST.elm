@@ -76,7 +76,7 @@ union l r =
 
 unionHelp : Int -> BST comparable -> BST comparable -> BST comparable
 unionHelp budget l r =
-    if budget <= 50 then
+    if budget <= 200 then
         fromSortedList (mergeSorted (toList l) (toList r) [])
 
     else
