@@ -1,5 +1,5 @@
 module BuildTask exposing
-    ( FileOrDirectory, input, inputs
+    ( FileOrDirectory, input, inputs, downloadSHA256
     , do, succeed, fail
     , writeFile, run
     , map, map2, map3, map4, andThen, combine, combineBy, each, sequence, toResult
@@ -14,7 +14,7 @@ module BuildTask exposing
 
 ## Input
 
-@docs FileOrDirectory, input, inputs
+@docs FileOrDirectory, input, inputs, downloadSHA256
 
 
 ## Building blocks
@@ -136,6 +136,12 @@ triggerDebugger =
 input : Path -> BuildTask FileOrDirectory
 input inputPath =
     Internal.input inputPath
+
+
+{-| -}
+downloadSHA256 : { url : String, sha256 : String } -> BuildTask FileOrDirectory
+downloadSHA256 config =
+    Internal.downloadSHA256 config
 
 
 {-| -}

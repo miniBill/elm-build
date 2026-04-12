@@ -1,4 +1,4 @@
-module BuildTask.Internal exposing (BuildTask(..), Input, andThen, combineBy, commandLog, derive, execLog, extendHashWith, fail, hashFromString, input, jobs, map, map2, map3, map4, named, run, sequence, succeed, timed, toResult, triggerDebugger, withFile, withPrefix)
+module BuildTask.Internal exposing (BuildTask(..), Input, andThen, combineBy, commandLog, derive, downloadSHA256, execLog, extendHashWith, fail, hashFromString, input, jobs, map, map2, map3, map4, named, run, sequence, succeed, timed, toResult, triggerDebugger, withFile, withPrefix)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Customs
@@ -414,6 +414,54 @@ input inputPath =
                 derive "input" hash <| \{ prefix, buildPath } target ->
                 execLog prefix "cp" [ Path.toString inputPath, Hash.toPathTemporary buildPath target ]
             )
+
+
+downloadSHA256 : { url : String, sha256 : String } -> BuildTask (Hash Normal)
+downloadSHA256 { url, sha256 } =
+    let
+        hashLength : Int
+        hashLength =
+            String.length sha256
+    in
+    if hashLength /= 64 then
+        fail ("Wrong hash length: " ++ String.fromInt hashLength ++ " for hash " ++ sha256)
+
+    else
+        case Hex.fromString sha256 of
+            Err e ->
+                fail ("Invalid hex hash: " ++ e ++ " for hash " ++ sha256)
+
+            Ok hex ->
+                derive "downloadSHA256" (Hash.build hex) <| \{ prefix, buildPath } target ->
+                let
+                    tmpPath : String
+                    tmpPath =
+                        Hash.toPathTemporary buildPath target
+                in
+                Do.do
+                    (Stream.http
+                        { url = url
+                        , method = "GET"
+                        , headers = []
+                        , body = Http.emptyBody
+                        , retries = Nothing
+                        , timeoutInMs = Nothing
+                        }
+                        |> Stream.pipe (Stream.fileWrite tmpPath)
+                        |> Stream.run
+                    )
+                <| \_ ->
+                Do.do (commandLog prefix "sha256sum" [ tmpPath ]) <| \body ->
+                if String.startsWith sha256 body then
+                    BackendTask.succeed ()
+
+                else
+                    let
+                        msg : String
+                        msg =
+                            "Wrong hash: expected " ++ sha256 ++ ", got " ++ String.left 64 body
+                    in
+                    BackendTask.fail (FatalError.fromString msg)
 
 
 {-| -}
