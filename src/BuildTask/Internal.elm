@@ -1,4 +1,4 @@
-module BuildTask.Internal exposing (BuildTask(..), Input, Warning, andThen, andThen2, combineBy, commandLog, derive, downloadSHA256, execLog, extendHashWith, fail, hashFromString, input, jobs, map, map2, map3, map4, named, run, sequence, succeed, timed, toResult, triggerDebugger, withFile, withPrefix, withWarning)
+module BuildTask.Internal exposing (BuildTask(..), Input, Warning, andThen, andThen2, combineBy, commandLog, derive, downloadSHA256, execLog, extendHashWith, fail, hashFromString, input, jobs, map, map2, map3, map4, map5, named, run, sequence, succeed, timed, toResult, triggerDebugger, withFile, withPrefix, withWarning)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Customs
@@ -198,7 +198,7 @@ map3 f a b c =
         (\input_ deps ->
             BackendTask.map3
                 (\( va, outputA ) ( vb, outputB ) ( vc, outputC ) ->
-                    ( f va vb vc, combineOutput outputA outputB |> combineOutput outputC )
+                    ( f va vb vc, combineOutputs [ outputA, outputB, outputC ] )
                 )
                 (runMonad a input_ deps)
                 (runMonad b input_ deps)
@@ -220,15 +220,39 @@ map4 f a b c d =
             BackendTask.map4
                 (\( va, outputA ) ( vb, outputB ) ( vc, outputC ) ( vd, outputD ) ->
                     ( f va vb vc vd
-                    , combineOutput
-                        (combineOutput outputA outputB)
-                        (combineOutput outputC outputD)
+                    , combineOutputs [ outputA, outputB, outputC, outputD ]
                     )
                 )
                 (runMonad a input_ deps)
                 (runMonad b input_ deps)
                 (runMonad c input_ deps)
                 (runMonad d input_ deps)
+        )
+
+
+{-| -}
+map5 :
+    (a -> b -> c -> d -> e -> f)
+    -> BuildTask a
+    -> BuildTask b
+    -> BuildTask c
+    -> BuildTask d
+    -> BuildTask e
+    -> BuildTask f
+map5 f a b c d e =
+    BuildTask "map5"
+        (\input_ deps ->
+            BackendTask.map5
+                (\( va, outputA ) ( vb, outputB ) ( vc, outputC ) ( vd, outputD ) ( ve, outputE ) ->
+                    ( f va vb vc vd ve
+                    , combineOutputs [ outputA, outputB, outputC, outputD, outputE ]
+                    )
+                )
+                (runMonad a input_ deps)
+                (runMonad b input_ deps)
+                (runMonad c input_ deps)
+                (runMonad d input_ deps)
+                (runMonad e input_ deps)
         )
 
 

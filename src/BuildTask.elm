@@ -3,7 +3,7 @@ module BuildTask exposing
     , FileOrDirectory, input, inputs, downloadSHA256
     , do, succeed, fail
     , writeFile, run
-    , map, map2, map3, map4, andThen, andThen2, combine, combineBy, combineInto, each, sequence, toResult
+    , map, map2, map3, map4, map5, andThen, andThen2, combine, combineBy, combineInto, each, sequence, toResult
     , withFile
     , withPrefix, timed
     , Warning, withWarning, withWarnings
@@ -35,7 +35,7 @@ module BuildTask exposing
 
 ## Transforming and combining `Monad` values
 
-@docs map, map2, map3, map4, andThen, andThen2, combine, combineBy, combineInto, each, sequence, toResult
+@docs map, map2, map3, map4, map5, andThen, andThen2, combine, combineBy, combineInto, each, sequence, toResult
 
 
 ## Operations
@@ -128,6 +128,19 @@ map4 :
     -> BuildTask e
 map4 f a b c d =
     Internal.map4 f a b c d
+
+
+{-| -}
+map5 :
+    (a -> b -> c -> d -> e -> f)
+    -> BuildTask a
+    -> BuildTask b
+    -> BuildTask c
+    -> BuildTask d
+    -> BuildTask e
+    -> BuildTask f
+map5 f a b c d e =
+    Internal.map5 f a b c d e
 
 
 {-| -}
