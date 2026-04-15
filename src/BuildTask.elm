@@ -7,7 +7,7 @@ module BuildTask exposing
     , withFile
     , withPrefix, timed
     , Warning, withWarning, withWarnings
-    , jobs, triggerDebugger
+    , jobs, triggerDebugger, fromResult
     )
 
 {-|
@@ -55,7 +55,7 @@ module BuildTask exposing
 
 ## Utils
 
-@docs jobs, triggerDebugger
+@docs jobs, triggerDebugger, fromResult
 
 -}
 
@@ -386,3 +386,13 @@ withWarnings warnings task =
 withWarning : Warning -> BuildTask a -> BuildTask a
 withWarning warning task =
     Internal.withWarning warning task
+
+
+fromResult : Result String a -> BuildTask a
+fromResult res =
+    case res of
+        Ok o ->
+            succeed o
+
+        Err e ->
+            fail e
