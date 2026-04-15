@@ -1,4 +1,4 @@
-module BuildTask.Internal exposing (BuildTask(..), Input, andThen, combineBy, commandLog, derive, downloadSHA256, execLog, extendHashWith, fail, hashFromString, input, jobs, map, map2, map3, map4, named, run, sequence, succeed, timed, toResult, triggerDebugger, withFile, withPrefix)
+module BuildTask.Internal exposing (BuildTask(..), Input, Warning, andThen, andThen2, combineBy, commandLog, derive, downloadSHA256, execLog, extendHashWith, fail, hashFromString, input, jobs, map, map2, map3, map4, named, run, sequence, succeed, timed, toResult, triggerDebugger, withFile, withPrefix, withWarning)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Customs
@@ -7,22 +7,29 @@ import BackendTask.Extra
 import BackendTask.File as File
 import BackendTask.Http as Http
 import BackendTask.Stream as Stream
+import FastSet as Set exposing (Set)
 import FatalError exposing (FatalError)
 import Hash exposing (Hash, Normal, Temporary)
 import HashSet exposing (HashSet)
 import Hex
 import Json.Encode
 import Pages.Script as Script
+import Parser.Error exposing (Output)
 import Path exposing (Path)
 
 
 type BuildTask a
-    = BuildTask
-        String
-        (Input
-         -> HashSet -- deps
-         -> BackendTask FatalError ( a, HashSet )
-        )
+    = BuildTask String (Input -> State -> BackendTask FatalError ( a, State ))
+
+
+type alias State =
+    { deps : HashSet
+    , warnings : Set String
+    }
+
+
+type alias Warning =
+    String
 
 
 type alias Input =
@@ -46,11 +53,11 @@ derive :
     -> BuildTask (Hash Normal)
 derive description target inner =
     BuildTask "derive"
-        (\({ existing, buildPath } as input_) deps ->
+        (\({ existing, buildPath } as input_) state ->
             let
                 newDeps : HashSet
                 newDeps =
-                    HashSet.insert target deps
+                    HashSet.insert target state.deps
 
                 appendLog : BackendTask FatalError ()
                 appendLog =
@@ -71,13 +78,13 @@ derive description target inner =
                         BackendTask.succeed ()
             in
             Do.do appendLog <| \_ ->
-            if HashSet.member target existing || HashSet.member target deps then
-                BackendTask.succeed ( target, newDeps )
+            if HashSet.member target existing || HashSet.member target state.deps then
+                BackendTask.succeed ( target, { deps = newDeps, warnings = state.warnings } )
 
             else
                 Do.do (File.exists (Hash.toPath buildPath target)) <| \exists ->
                 if exists then
-                    BackendTask.succeed ( target, newDeps )
+                    BackendTask.succeed ( target, { deps = newDeps, warnings = state.warnings } )
 
                 else
                     let
@@ -105,25 +112,29 @@ derive description target inner =
                         )
                     <| \_ ->
                     Do.exec "chmod" [ "-R", "a=rX", Hash.toPath buildPath target ] <| \_ ->
-                    BackendTask.succeed ( target, newDeps )
+                    BackendTask.succeed ( target, { deps = newDeps, warnings = state.warnings } )
         )
 
 
-runMonad : BuildTask a -> Input -> HashSet -> BackendTask FatalError ( a, HashSet )
-runMonad (BuildTask label m) input_ deps =
+runMonad : BuildTask a -> Input -> State -> BackendTask FatalError ( a, State )
+runMonad (BuildTask label m) input_ state =
     if input_.debug then
-        m input_ deps
+        m input_ state
             |> BackendTask.andThen
-                (\( v, newDeps ) ->
-                    if HashSet.equals (HashSet.union deps newDeps) newDeps then
-                        BackendTask.succeed ( v, newDeps )
+                (\( v, newState ) ->
+                    if HashSet.equals (HashSet.union state.deps newState.deps) newState.deps then
+                        if Set.equals (Set.union state.warnings newState.warnings) newState.warnings then
+                            BackendTask.succeed ( v, newState )
+
+                        else
+                            BackendTask.fail (FatalError.fromString ("Missed warning inside " ++ label))
 
                     else
                         BackendTask.fail (FatalError.fromString ("Missed dependency inside " ++ label))
                 )
 
     else
-        m input_ deps
+        m input_ state
 
 
 {-| -}
@@ -133,8 +144,8 @@ map f m =
         (\input_ deps ->
             runMonad m input_ deps
                 |> BackendTask.map
-                    (\( v, newDeps ) ->
-                        ( f v, newDeps )
+                    (\( v, output ) ->
+                        ( f v, output )
                     )
         )
 
@@ -149,12 +160,30 @@ map2 f a b =
     BuildTask "map2"
         (\input_ deps ->
             BackendTask.map2
-                (\( va, depsA ) ( vb, depsB ) ->
-                    ( f va vb, HashSet.union depsA depsB )
+                (\( va, outputA ) ( vb, outputB ) ->
+                    ( f va vb, combineOutput outputA outputB )
                 )
                 (runMonad a input_ deps)
                 (runMonad b input_ deps)
         )
+
+
+combineOutput : State -> State -> State
+combineOutput l r =
+    { deps = HashSet.union l.deps r.deps
+    , warnings = Set.union l.warnings r.warnings
+    }
+
+
+combineOutputs : List State -> State
+combineOutputs ls =
+    let
+        ( deps, warnings ) =
+            List.foldl (\l ( d, w ) -> ( l.deps :: d, l.warnings :: w )) ( [], [] ) ls
+    in
+    { deps = HashSet.unionAll deps
+    , warnings = List.foldl Set.union Set.empty warnings
+    }
 
 
 {-| -}
@@ -168,8 +197,8 @@ map3 f a b c =
     BuildTask "map3"
         (\input_ deps ->
             BackendTask.map3
-                (\( va, depsA ) ( vb, depsB ) ( vc, depsC ) ->
-                    ( f va vb vc, HashSet.union depsA depsB |> HashSet.union depsC )
+                (\( va, outputA ) ( vb, outputB ) ( vc, outputC ) ->
+                    ( f va vb vc, combineOutput outputA outputB |> combineOutput outputC )
                 )
                 (runMonad a input_ deps)
                 (runMonad b input_ deps)
@@ -189,11 +218,11 @@ map4 f a b c d =
     BuildTask "map4"
         (\input_ deps ->
             BackendTask.map4
-                (\( va, depsA ) ( vb, depsB ) ( vc, depsC ) ( vd, depsD ) ->
+                (\( va, outputA ) ( vb, outputB ) ( vc, outputC ) ( vd, outputD ) ->
                     ( f va vb vc vd
-                    , HashSet.union
-                        (HashSet.union depsA depsB)
-                        (HashSet.union depsC depsD)
+                    , combineOutput
+                        (combineOutput outputA outputB)
+                        (combineOutput outputC outputD)
                     )
                 )
                 (runMonad a input_ deps)
@@ -216,16 +245,32 @@ andThen f m =
         )
 
 
-withFile : Hash Normal -> (String -> BuildTask a) -> BuildTask a
-withFile hash f =
-    BuildTask "withFile"
-        (\({ buildPath } as input_) deps ->
-            Do.allowFatal (File.rawFile (Hash.toPath buildPath hash)) <| \raw ->
-            runMonad (f raw) input_ (HashSet.insert hash deps)
+{-| -}
+andThen2 : (a -> b -> BuildTask c) -> BuildTask a -> BuildTask b -> BuildTask c
+andThen2 f l r =
+    BuildTask "andThen2"
+        (\input_ deps ->
+            BackendTask.map2
+                Tuple.pair
+                (runMonad l input_ deps)
+                (runMonad r input_ deps)
+                |> BackendTask.andThen
+                    (\( ( lv, lOutput ), ( rv, rOutput ) ) ->
+                        runMonad (f lv rv) input_ (combineOutput lOutput rOutput)
+                    )
         )
 
 
-run : { jobs : Maybe Int, debug : Bool, hashKind : Hash.Kind } -> Path -> BuildTask (Hash Normal) -> BackendTask FatalError { output : Path, intermediate : List Path }
+withFile : Hash Normal -> (String -> BuildTask a) -> BuildTask a
+withFile hash f =
+    BuildTask "withFile"
+        (\({ buildPath } as input_) state ->
+            Do.allowFatal (File.rawFile (Hash.toPath buildPath hash)) <| \raw ->
+            runMonad (f raw) input_ { deps = HashSet.insert hash state.deps, warnings = state.warnings }
+        )
+
+
+run : { jobs : Maybe Int, debug : Bool, hashKind : Hash.Kind } -> Path -> BuildTask (Hash Normal) -> BackendTask FatalError { output : Path, intermediate : List Path, warnings : Set String }
 run config buildPath m =
     Do.do (listExisting buildPath) <| \existing ->
     Do.do
@@ -248,14 +293,15 @@ run config buildPath m =
             , hashKind = config.hashKind
             }
     in
-    runMonad m input_ HashSet.empty
+    runMonad m input_ { deps = HashSet.empty, warnings = Set.empty }
         |> BackendTask.map
-            (\( output, deps ) ->
+            (\( output, state ) ->
                 { output = Path.path (Hash.toPath buildPath output)
                 , intermediate =
-                    deps
+                    state.deps
                         |> HashSet.toList
                         |> List.map (\raw -> raw |> Hash.toPath buildPath |> Path.path)
+                , warnings = state.warnings
                 }
             )
 
@@ -291,7 +337,7 @@ combineBy n ops =
                             (\resList ->
                                 resList
                                     |> List.unzip
-                                    |> Tuple.mapSecond HashSet.unionAll
+                                    |> Tuple.mapSecond combineOutputs
                             )
         )
 
@@ -311,7 +357,7 @@ sequence ops =
                         (\res ->
                             res
                                 |> List.unzip
-                                |> Tuple.mapSecond (List.foldl HashSet.union HashSet.empty)
+                                |> Tuple.mapSecond combineOutputs
                         )
         )
 
@@ -386,6 +432,22 @@ fail msg =
                 BuildTask "fail"
                     (\_ _ -> BackendTask.fail (FatalError.fromString msg))
             )
+
+
+withWarning : Warning -> BuildTask a -> BuildTask a
+withWarning warning (BuildTask n f) =
+    BuildTask n
+        (\input_ deps ->
+            f input_ deps
+                |> BackendTask.map
+                    (\( r, newState ) ->
+                        ( r
+                        , { deps = newState.deps
+                          , warnings = Set.insert warning newState.warnings
+                          }
+                        )
+                    )
+        )
 
 
 triggerDebugger : BuildTask ()
@@ -508,20 +570,30 @@ named name encode action param =
         |> andThen
             (\hash ->
                 BuildTask "named"
-                    (\input_ deps ->
-                        if HashSet.member hash input_.existing || HashSet.member hash deps then
-                            BackendTask.succeed ( hash, HashSet.insert hash deps )
+                    (\input_ state ->
+                        if HashSet.member hash input_.existing || HashSet.member hash state.deps then
+                            ( hash
+                            , { deps = HashSet.insert hash state.deps
+                              , warnings = state.warnings
+                              }
+                            )
+                                |> BackendTask.succeed
 
                         else
-                            runMonad (action param) input_ deps
+                            runMonad (action param) input_ state
                                 |> BackendTask.andThen
-                                    (\( actionOutput, newDeps ) ->
+                                    (\( actionOutput, newState ) ->
                                         Do.exec "mv"
                                             [ Hash.toPath input_.buildPath actionOutput
                                             , Hash.toPath input_.buildPath hash
                                             ]
                                         <| \_ ->
-                                        BackendTask.succeed ( hash, HashSet.insert hash newDeps )
+                                        BackendTask.succeed
+                                            ( hash
+                                            , { deps = HashSet.insert hash newState.deps
+                                              , warnings = newState.warnings
+                                              }
+                                            )
                                     )
                     )
             )

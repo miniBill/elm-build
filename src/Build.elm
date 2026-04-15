@@ -11,11 +11,11 @@ import Buildfile
 import Cli.Option as Option
 import Cli.OptionsParser as OptionsParser
 import Cli.Program as Program
+import FastSet as Set exposing (Set)
 import FatalError exposing (FatalError)
 import Hash
 import Pages.Script as Script exposing (Script)
 import Path exposing (Path)
-import Set exposing (Set)
 import Time
 
 
@@ -167,11 +167,28 @@ toTask config =
                 elapsed : Int
                 elapsed =
                     Time.posixToMillis end - Time.posixToMillis begin
+
+                msg =
+                    "Build done in "
+                        ++ timeToString elapsed
+                        ++ " with "
+                        ++ String.fromInt (Set.size combined.warnings)
+                        ++ " "
+                        ++ plural (Set.size combined.warnings) "warning" "warnings"
             in
-            Script.log ("Build done in " ++ timeToString elapsed)
+            Script.log msg
 
         else
             Script.log (String.fromInt (Set.size unexpected) ++ " stale files in the build directory")
+
+
+plural : Int -> String -> String -> String
+plural n singular plural_ =
+    if n == 1 then
+        singular
+
+    else
+        plural_
 
 
 timeToString : Int -> String

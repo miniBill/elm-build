@@ -107,7 +107,7 @@ buildAction config inputs =
              }
                 :: List.concatMap processedFileToFileList processedFiles
             )
-                |> BuildTask.combine
+                |> BuildTask.combineInto
                 |> BuildTask.withPrefix ("[" ++ String.fromInt inputSize ++ "/" ++ String.fromInt inputSize ++ "]")
     in
     Do.map4 T4
@@ -116,7 +116,7 @@ buildAction config inputs =
         (imagesSizesFile imageFiles)
         publicFolder
     <| \(T4 imagesElm fontsElm imageSizes public) ->
-    BuildTask.combine
+    BuildTask.combineInto
         [ { filename = Path.path "generated/Images.elm", hash = imagesElm }
         , fontsElm
         , { filename = Path.path "image-sizes", hash = imageSizes }

@@ -1,15 +1,21 @@
 module BuildTask exposing
-    ( FileOrDirectory, input, inputs, downloadSHA256
+    ( BuildTask
+    , FileOrDirectory, input, inputs, downloadSHA256
     , do, succeed, fail
     , writeFile, run
-    , map, map2, map3, map4, andThen, combine, combineBy, each, sequence, toResult
+    , map, map2, map3, map4, andThen, andThen2, combine, combineBy, combineInto, each, sequence, toResult
     , withFile
     , withPrefix, timed
+    , Warning, withWarning, withWarnings
     , jobs, triggerDebugger
-    , BuildTask
     )
 
 {-|
+
+
+## Types
+
+@docs BuildTask
 
 
 ## Input
@@ -29,7 +35,7 @@ module BuildTask exposing
 
 ## Transforming and combining `Monad` values
 
-@docs map, map2, map3, map4, andThen, combine, combineBy, each, sequence, toResult
+@docs map, map2, map3, map4, andThen, andThen2, combine, combineBy, combineInto, each, sequence, toResult
 
 
 ## Operations
@@ -40,6 +46,11 @@ module BuildTask exposing
 ## Output control
 
 @docs withPrefix, timed
+
+
+## Warnings
+
+@docs Warning, withWarning, withWarnings
 
 
 ## Utils
@@ -53,6 +64,7 @@ import BackendTask.Do as Do
 import BackendTask.Extra
 import BuildTask.Internal as Internal
 import FastDict as Dict exposing (Dict)
+import FastSet exposing (Set)
 import FatalError exposing (FatalError)
 import Hash exposing (Hash)
 import Pages.Script as Script
@@ -67,6 +79,10 @@ type alias BuildTask a =
 
 type alias FileOrDirectory =
     Hash Hash.Normal
+
+
+type alias Warning =
+    Internal.Warning
 
 
 {-| -}
@@ -118,6 +134,15 @@ map4 f a b c d =
 andThen : (a -> BuildTask b) -> BuildTask a -> BuildTask b
 andThen f m =
     Internal.andThen f m
+
+
+andThen2 :
+    (a -> b -> BuildTask c)
+    -> BuildTask a
+    -> BuildTask b
+    -> BuildTask c
+andThen2 f l r =
+    Internal.andThen2 f l r
 
 
 {-| -}
@@ -185,8 +210,8 @@ type Tree
 
 
 {-| -}
-combine : List { filename : Path, hash : FileOrDirectory } -> BuildTask FileOrDirectory
-combine files =
+combineInto : List { filename : Path, hash : FileOrDirectory } -> BuildTask FileOrDirectory
+combineInto files =
     files
         |> buildTree
         |> combineTree
@@ -297,7 +322,11 @@ writeFile content =
 
 
 {-| -}
-run : { jobs : Maybe Int, debug : Bool, hashKind : Hash.Kind } -> Path -> BuildTask FileOrDirectory -> BackendTask FatalError { output : Path, intermediate : List Path }
+run :
+    { jobs : Maybe Int, debug : Bool, hashKind : Hash.Kind }
+    -> Path
+    -> BuildTask FileOrDirectory
+    -> BackendTask FatalError { output : Path, intermediate : List Path, warnings : Set Warning }
 run config buildPath m =
     Internal.run config buildPath m
 
@@ -306,6 +335,13 @@ run config buildPath m =
 combineBy : Int -> List (BuildTask a) -> BuildTask (List a)
 combineBy n ops =
     Internal.combineBy n ops
+
+
+{-| -}
+combine : List (BuildTask a) -> BuildTask (List a)
+combine inputs_ =
+    do jobs <| \parallelism ->
+    combineBy parallelism inputs_
 
 
 {-| -}
@@ -340,3 +376,13 @@ jobs =
 toResult : BuildTask a -> BuildTask (Result FatalError a)
 toResult task =
     Internal.toResult task
+
+
+withWarnings : List Warning -> BuildTask a -> BuildTask a
+withWarnings warnings task =
+    List.foldl withWarning task warnings
+
+
+withWarning : Warning -> BuildTask a -> BuildTask a
+withWarning warning task =
+    Internal.withWarning warning task

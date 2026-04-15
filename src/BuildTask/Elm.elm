@@ -11,7 +11,16 @@ codegen : Elm.File -> BuildTask { filename : Path, hash : FileOrDirectory }
 codegen file =
     Do.writeFile file.contents <| \hash ->
     BuildTask.do (format hash) <| \formatted ->
-    BuildTask.succeed { filename = Path.path ("generated/" ++ file.path), hash = formatted }
+    { filename = Path.path ("generated/" ++ file.path)
+    , hash = formatted
+    }
+        |> BuildTask.succeed
+        |> BuildTask.withWarnings (List.map formatWarning file.warnings)
+
+
+formatWarning : { declaration : String, warning : String } -> BuildTask.Warning
+formatWarning warning =
+    "In declaration " ++ warning.declaration ++ ": " ++ warning.warning
 
 
 format : FileOrDirectory -> BuildTask FileOrDirectory
