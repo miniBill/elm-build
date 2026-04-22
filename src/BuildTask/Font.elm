@@ -84,7 +84,10 @@ parse hash =
                 [ family, styleAndWeight ] ->
                     case parseStyleAndWeight styleAndWeight of
                         Ok { style, weight } ->
-                            { family = family, style = style, weight = weight }
+                            { family = String.replace ":" " " family
+                            , style = style
+                            , weight = weight
+                            }
                                 |> BuildTask.succeed
 
                         Err e ->
@@ -162,12 +165,12 @@ toCssFile files =
     files
         |> List.map
             (\{ family, style, weight, filename } ->
-                String.Multiline.here """
+                String.Multiline.here ("""
                 @font-face {
                     font-family: \"""" ++ family ++ """";
                     font-style: """ ++ styleToString style ++ """;
                     font-weight: """ ++ String.fromInt (weightToNumber weight) ++ """;
                     src: url(\"""" ++ Path.toString filename ++ """");
-                }"""
+                }""")
             )
         |> String.join "\n\n"
