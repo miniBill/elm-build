@@ -6,7 +6,7 @@
             "elm/html": "1.0.1"
         },
         "local": [
-            "../../elm-picture/src"
+            "../elm-picture/src"
         ]
     }
 }
