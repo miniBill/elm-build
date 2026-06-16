@@ -84,7 +84,12 @@ derive description target inner =
                 BackendTask.succeed ( target, { deps = newDeps, warnings = state.warnings } )
 
             else
-                Do.do (File.exists (Hash.toPath buildPath target)) <| \exists ->
+                let
+                    targetPath : String
+                    targetPath =
+                        Hash.toPath buildPath target
+                in
+                Do.do (File.exists targetPath) <| \exists ->
                 if exists && not input_.check then
                     BackendTask.succeed ( target, { deps = newDeps, warnings = state.warnings } )
 
@@ -109,9 +114,9 @@ derive description target inner =
                         )
                     <| \_ ->
                     Do.do
-                        (if input_.check then
+                        (if exists then
                             Do.do
-                                (checkAreSame tmpPath (Hash.toPath buildPath target)
+                                (Script.exec "diff" [ "-r", tmpPath, targetPath ]
                                     |> BackendTask.onError
                                         (\e ->
                                             Do.log ("Error inside " ++ description) <| \_ ->
@@ -122,7 +127,7 @@ derive description target inner =
                             BackendTask.File.Extra.removeFileIfExists tmpPath
 
                          else
-                            Script.exec "mv" [ tmpPath, Hash.toPath buildPath target ]
+                            Script.exec "mv" [ tmpPath, targetPath ]
                                 |> BackendTask.onError
                                     (\e ->
                                         Do.log ("Error inside " ++ description) <| \_ ->
@@ -130,14 +135,9 @@ derive description target inner =
                                     )
                         )
                     <| \_ ->
-                    Do.exec "chmod" [ "-R", "a=rX", Hash.toPath buildPath target ] <| \_ ->
+                    Do.exec "chmod" [ "-R", "a=rX", targetPath ] <| \_ ->
                     BackendTask.succeed ( target, { deps = newDeps, warnings = state.warnings } )
         )
-
-
-checkAreSame : String -> String -> BackendTask FatalError ()
-checkAreSame new old =
-    Script.exec "diff" [ "-r", new, old ]
 
 
 runMonad : BuildTask a -> Input -> State -> BackendTask FatalError ( a, State )
