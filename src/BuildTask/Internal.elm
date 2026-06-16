@@ -14,7 +14,6 @@ import HashSet exposing (HashSet)
 import Hex
 import Json.Encode
 import Pages.Script as Script
-import Parser.Error exposing (Output)
 import Path exposing (Path)
 
 
