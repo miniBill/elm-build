@@ -91,13 +91,27 @@ derive description target inner =
                         tmp : Hash Temporary
                         tmp =
                             Hash.toTemporary target
+
+                        tmpPath : String
+                        tmpPath =
+                            Hash.toPathTemporary buildPath tmp
                     in
-                    Do.exec "rm" [ "-rf", Hash.toPathTemporary buildPath tmp ] <| \_ ->
+                    Do.do (File.exists tmpPath) <| \tmpExists ->
+                    Do.do
+                        (if tmpExists then
+                            Do.exec "chmod" [ "-R", "777", tmpPath ] <| \_ ->
+                            Do.exec "rm" [ "-rf", tmpPath ] <| \_ ->
+                            Do.noop
+
+                         else
+                            Do.noop
+                        )
+                    <| \_ ->
                     Do.do
                         (inner input_ tmp
                             |> BackendTask.onError
                                 (\e ->
-                                    Do.exec "rm" [ "-rf", Hash.toPathTemporary buildPath tmp ] <| \_ ->
+                                    Do.exec "rm" [ "-rf", tmpPath ] <| \_ ->
                                     BackendTask.fail e
                                 )
                         )
@@ -105,7 +119,7 @@ derive description target inner =
                     Do.do
                         (if input_.check then
                             Do.do
-                                (checkAreSame (Hash.toPathTemporary buildPath tmp) (Hash.toPath buildPath target)
+                                (checkAreSame tmpPath (Hash.toPath buildPath target)
                                     |> BackendTask.onError
                                         (\e ->
                                             Do.log ("Error inside " ++ description) <| \_ ->
@@ -113,10 +127,10 @@ derive description target inner =
                                         )
                                 )
                             <| \_ ->
-                            Script.exec "rm" [ "-rf", Hash.toPathTemporary buildPath tmp ]
+                            Script.exec "rm" [ "-rf", tmpPath ]
 
                          else
-                            Script.exec "mv" [ Hash.toPathTemporary buildPath tmp, Hash.toPath buildPath target ]
+                            Script.exec "mv" [ tmpPath, Hash.toPath buildPath target ]
                                 |> BackendTask.onError
                                     (\e ->
                                         Do.log ("Error inside " ++ description) <| \_ ->
