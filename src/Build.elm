@@ -36,6 +36,7 @@ type alias Config inputs =
     , removeStale : Bool
     , jobs : Maybe Int
     , debug : Bool
+    , check : Bool
     , hashKind : HashKind
     }
 
@@ -105,6 +106,10 @@ programConfig =
                         |> Option.withDescription "Output debug info"
                     )
                 |> OptionsParser.with
+                    (Option.flag "check"
+                        |> Option.withDescription "Re-run all commands to check for determinism"
+                    )
+                |> OptionsParser.with
                     (Option.optionalKeywordArg "hash-kind"
                         |> Option.withDescription "Kind of hash to use. Choose fast for FNV1a, secure for sha256."
                         |> Option.withDefault "fast"
@@ -121,7 +126,7 @@ toTask config =
         Do.do config.getInputs <| \inputs ->
         Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Processing inputs") <| \_ ->
         Do.exec "mkdir" [ "-p", Path.toString config.buildDirectory ] <| \_ ->
-        Do.do (BuildTask.run { jobs = config.jobs, debug = config.debug, hashKind = config.hashKind } config.buildDirectory (config.buildAction inputs)) <| \combined ->
+        Do.do (BuildTask.run { jobs = config.jobs, debug = config.debug, check = config.check, hashKind = config.hashKind } config.buildDirectory (config.buildAction inputs)) <| \combined ->
         Do.exec "rm" [ "-f", Path.toString config.outputName ] <| \_ ->
         symlink_
             { source = config.outputName

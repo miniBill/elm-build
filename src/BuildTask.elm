@@ -336,7 +336,7 @@ writeFile content =
 
 {-| -}
 run :
-    { jobs : Maybe Int, debug : Bool, hashKind : Hash.Kind }
+    { jobs : Maybe Int, debug : Bool, check : Bool, hashKind : Hash.Kind }
     -> Path
     -> BuildTask FileOrDirectory
     -> BackendTask FatalError { output : Path, intermediate : List Path, warnings : Set Warning }

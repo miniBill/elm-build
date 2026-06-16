@@ -37,6 +37,7 @@ type alias Input =
     , buildPath : Path
     , jobs : Int
     , debug : Bool
+    , check : Bool
     , hashKind : Hash.Kind
     }
 
@@ -77,12 +78,12 @@ derive description target inner =
                         BackendTask.succeed ()
             in
             Do.do appendLog <| \_ ->
-            if HashSet.member target existing || HashSet.member target state.deps then
+            if (HashSet.member target existing && not input_.check) || HashSet.member target state.deps then
                 BackendTask.succeed ( target, { deps = newDeps, warnings = state.warnings } )
 
             else
                 Do.do (File.exists (Hash.toPath buildPath target)) <| \exists ->
-                if exists then
+                if exists && not input_.check then
                     BackendTask.succeed ( target, { deps = newDeps, warnings = state.warnings } )
 
                 else
@@ -102,17 +103,35 @@ derive description target inner =
                         )
                     <| \_ ->
                     Do.do
-                        (Script.exec "mv" [ Hash.toPathTemporary buildPath tmp, Hash.toPath buildPath target ]
-                            |> BackendTask.onError
-                                (\e ->
-                                    Do.log ("Error inside " ++ description) <| \_ ->
-                                    BackendTask.fail e
+                        (if input_.check then
+                            Do.do
+                                (checkAreSame (Hash.toPathTemporary buildPath tmp) (Hash.toPath buildPath target)
+                                    |> BackendTask.onError
+                                        (\e ->
+                                            Do.log ("Error inside " ++ description) <| \_ ->
+                                            BackendTask.fail e
+                                        )
                                 )
+                            <| \_ ->
+                            Script.exec "rm" [ "-rf", Hash.toPathTemporary buildPath tmp ]
+
+                         else
+                            Script.exec "mv" [ Hash.toPathTemporary buildPath tmp, Hash.toPath buildPath target ]
+                                |> BackendTask.onError
+                                    (\e ->
+                                        Do.log ("Error inside " ++ description) <| \_ ->
+                                        BackendTask.fail e
+                                    )
                         )
                     <| \_ ->
                     Do.exec "chmod" [ "-R", "a=rX", Hash.toPath buildPath target ] <| \_ ->
                     BackendTask.succeed ( target, { deps = newDeps, warnings = state.warnings } )
         )
+
+
+checkAreSame : String -> String -> BackendTask FatalError ()
+checkAreSame new old =
+    Script.exec "diff" [ "-r", new, old ]
 
 
 runMonad : BuildTask a -> Input -> State -> BackendTask FatalError ( a, State )
@@ -293,7 +312,7 @@ withFile hash f =
         )
 
 
-run : { jobs : Maybe Int, debug : Bool, hashKind : Hash.Kind } -> Path -> BuildTask (Hash Normal) -> BackendTask FatalError { output : Path, intermediate : List Path, warnings : Set String }
+run : { jobs : Maybe Int, debug : Bool, check : Bool, hashKind : Hash.Kind } -> Path -> BuildTask (Hash Normal) -> BackendTask FatalError { output : Path, intermediate : List Path, warnings : Set String }
 run config buildPath m =
     Do.do (listExisting buildPath) <| \existing ->
     Do.do
@@ -314,6 +333,7 @@ run config buildPath m =
             , jobs = jobs_
             , debug = config.debug
             , hashKind = config.hashKind
+            , check = config.check
             }
     in
     runMonad m input_ { deps = HashSet.empty, warnings = Set.empty }
