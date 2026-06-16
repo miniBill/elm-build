@@ -5,6 +5,7 @@ module BuildTask.Unsafe exposing (commandInReadonlyDirectory, commandInWritableD
 import BackendTask
 import BackendTask.Do as Do
 import BackendTask.Extra
+import BackendTask.File.Extra
 import BackendTask.Http as Http
 import BackendTask.Stream as Stream
 import BuildTask exposing (BuildTask, FileOrDirectory)
@@ -125,14 +126,14 @@ commandInWritableDirectory cmd args hash =
         workspacePath =
             Hash.toPathWorkspace buildPath (Hash.toWorkspace target)
     in
-    Do.exec "rm" [ "-rf", workspacePath ] <| \_ ->
+    Do.do (BackendTask.File.Extra.removeFileIfExists workspacePath) <| \_ ->
     Do.exec "cp" [ "-r", Hash.toPath buildPath hash, workspacePath ] <| \_ ->
     Do.exec "chmod" [ "-R", "u+w", workspacePath ] <| \_ ->
     Do.do
         (Internal.commandLog prefix cmd args
             |> BackendTask.inDir workspacePath
             |> BackendTask.Extra.finally
-                (Script.exec "rm" [ "-rf", workspacePath ])
+                (BackendTask.File.Extra.removeFileIfExists workspacePath)
         )
     <| \output ->
     BackendTask.allowFatal (Script.writeFile { path = Hash.toPathTemporary buildPath target, body = output })

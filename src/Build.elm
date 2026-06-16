@@ -5,6 +5,7 @@ import BackendTask exposing (BackendTask)
 import BackendTask.Customs
 import BackendTask.Do as Do
 import BackendTask.Extra
+import BackendTask.File.Extra
 import BackendTask.Time
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import Buildfile
@@ -159,11 +160,7 @@ toTask config =
             Do.log ("Removing " ++ String.fromInt (Set.size unexpected) ++ " files from the build directory") <| \_ ->
             Do.do
                 (Set.toList unexpected
-                    |> List.map
-                        (\i ->
-                            Do.exec "chmod" [ "-R", "700", i ] <| \_ ->
-                            Script.exec "rm" [ "-rf", i ]
-                        )
+                    |> List.map BackendTask.File.Extra.removeFileIfExists
                     |> BackendTask.Extra.sequence_
                 )
             <| \_ ->

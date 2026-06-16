@@ -5,6 +5,7 @@ import BackendTask.Customs
 import BackendTask.Do as Do
 import BackendTask.Extra
 import BackendTask.File as File
+import BackendTask.File.Extra
 import BackendTask.Http as Http
 import BackendTask.Stream as Stream
 import FastSet as Set exposing (Set)
@@ -13,6 +14,7 @@ import Hash exposing (Hash, Normal, Temporary)
 import HashSet exposing (HashSet)
 import Hex
 import Json.Encode
+import List.Extra
 import Pages.Script as Script
 import Path exposing (Path)
 
@@ -96,22 +98,12 @@ derive description target inner =
                         tmpPath =
                             Hash.toPathTemporary buildPath tmp
                     in
-                    Do.do (File.exists tmpPath) <| \tmpExists ->
-                    Do.do
-                        (if tmpExists then
-                            Do.exec "chmod" [ "-R", "777", tmpPath ] <| \_ ->
-                            Do.exec "rm" [ "-rf", tmpPath ] <| \_ ->
-                            Do.noop
-
-                         else
-                            Do.noop
-                        )
-                    <| \_ ->
+                    Do.do (BackendTask.File.Extra.removeFileIfExists tmpPath) <| \_ ->
                     Do.do
                         (inner input_ tmp
                             |> BackendTask.onError
                                 (\e ->
-                                    Do.exec "rm" [ "-rf", tmpPath ] <| \_ ->
+                                    Do.do (BackendTask.File.Extra.removeFileIfExists tmpPath) <| \_ ->
                                     BackendTask.fail e
                                 )
                         )
@@ -127,7 +119,7 @@ derive description target inner =
                                         )
                                 )
                             <| \_ ->
-                            Script.exec "rm" [ "-rf", tmpPath ]
+                            BackendTask.File.Extra.removeFileIfExists tmpPath
 
                          else
                             Script.exec "mv" [ tmpPath, Hash.toPath buildPath target ]
@@ -368,7 +360,7 @@ listExisting path =
     BackendTask.Customs.readdir path
         |> BackendTask.andThen
             (\list ->
-                case HashSet.fromList list of
+                case HashSet.fromList (List.Extra.removeWhen (String.startsWith "tmp-") list) of
                     Ok o ->
                         BackendTask.succeed o
 
