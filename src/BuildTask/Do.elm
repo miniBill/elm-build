@@ -1,4 +1,4 @@
-module BuildTask.Do exposing (all, andThen, combine, each, jobs, map, map2, map3, map4, withFile, writeFile)
+module BuildTask.Do exposing (all, andThen, combine, each, jobs, map, map2, map3, map4, map5, withFile, writeFile)
 
 import BuildTask exposing (BuildTask, FileOrDirectory)
 
@@ -58,6 +58,19 @@ map4 :
     -> BuildTask r
 map4 f a b c d k =
     BuildTask.map4 f a b c d |> andThen k
+
+
+map5 :
+    (a -> b -> c -> d -> e -> i)
+    -> BuildTask a
+    -> BuildTask b
+    -> BuildTask c
+    -> BuildTask d
+    -> BuildTask e
+    -> (i -> BuildTask r)
+    -> BuildTask r
+map5 f a b c d e k =
+    BuildTask.map5 f a b c d e |> andThen k
 
 
 writeFile :
