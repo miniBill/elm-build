@@ -164,59 +164,62 @@ fromList list =
 fromSortedList : List a -> BST a
 fromSortedList list =
     let
-        arr : Array a
-        arr =
-            list
-                |> unique
-                |> Array.fromList
+        ( deduped, len ) =
+            unique list
+
+        layers : Int
+        layers =
+            ceiling (logBase 2 (toFloat len + 1))
     in
-    fromSortedListHelp 0 (Array.length arr) arr
+    fromSortedListHelp layers deduped
+        |> Tuple.first
 
 
-fromSortedListHelp : Int -> Int -> Array a -> BST a
-fromSortedListHelp fromIncluded toExcluded arr =
-    if fromIncluded >= toExcluded then
-        BSTLeaf
+fromSortedListHelp : Int -> List a -> ( BST a, List a )
+fromSortedListHelp layers queue =
+    if layers == 0 then
+        ( BSTLeaf, queue )
 
     else
         let
-            mid : Int
-            mid =
-                fromIncluded + (toExcluded - fromIncluded) // 2
+            ( l, afterL ) =
+                fromSortedListHelp (layers - 1) queue
         in
-        case Array.get mid arr of
-            Nothing ->
-                BSTLeaf
+        case afterL of
+            [] ->
+                ( l, afterL )
 
-            Just k ->
-                BSTNode k
-                    (fromSortedListHelp fromIncluded mid arr)
-                    (fromSortedListHelp (mid + 1) toExcluded arr)
+            h :: t ->
+                let
+                    ( r, afterR ) =
+                        fromSortedListHelp (layers - 1) t
+                in
+                ( BSTNode h l r, afterR )
 
 
 {-| Remove duplicate elements as long as they're next to each other.
 -}
-unique : List a -> List a
+unique : List a -> ( List a, Int )
 unique list =
     case list of
         [] ->
-            []
+            ( [], 0 )
 
         h :: t ->
             let
-                ( nh, nt ) =
+                ( nh, nt, nl ) =
                     List.foldl
-                        (\e ( l, a ) ->
+                        (\e ( l, a, len ) ->
                             if e == l then
-                                ( l, a )
+                                ( l, a, len )
 
                             else
-                                ( e, l :: a )
+                                ( e, l :: a, len + 1 )
                         )
-                        ( h, [] )
+                        ( h, [], 1 )
                         t
             in
-            List.reverse (nh :: nt)
+            ( List.reverse (nh :: nt), nl )
 
 
 equals : BST comparable -> BST comparable -> Bool
