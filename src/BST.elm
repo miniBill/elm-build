@@ -182,19 +182,19 @@ fromSortedListHelp layers queue =
 
     else
         let
-            ( l, afterL ) =
+            ( r, afterR ) =
                 fromSortedListHelp (layers - 1) queue
         in
-        case afterL of
+        case afterR of
             [] ->
-                ( l, afterL )
+                ( r, afterR )
 
             h :: t ->
                 let
-                    ( r, afterR ) =
+                    ( l, afterL ) =
                         fromSortedListHelp (layers - 1) t
                 in
-                ( BSTNode h l r, afterR )
+                ( BSTNode h l r, afterL )
 
 
 {-| Remove duplicate elements as long as they're next to each other.
@@ -219,7 +219,7 @@ unique list =
                         ( h, [], 1 )
                         t
             in
-            ( List.reverse (nh :: nt), nl )
+            ( nh :: nt, nl )
 
 
 equals : BST comparable -> BST comparable -> Bool
