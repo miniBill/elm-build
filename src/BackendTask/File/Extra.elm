@@ -1,4 +1,4 @@
-module BackendTask.File.Extra exposing (..)
+module BackendTask.File.Extra exposing (removeFileIfExists)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Do as Do
