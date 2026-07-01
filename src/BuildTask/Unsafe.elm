@@ -164,6 +164,12 @@ commandWithFile cmd args hash =
     BackendTask.allowFatal (Script.writeFile { path = Hash.toPathTemporary buildPath target, body = output })
 
 
+{-| Downloads a file given its URL.
+
+**CORRECTNESS:**
+The file must never change on the server.
+
+-}
 downloadImmutable : String -> BuildTask FileOrDirectory
 downloadImmutable url =
     BuildTask.do (Internal.hashFromString url) <| \outputHash ->
