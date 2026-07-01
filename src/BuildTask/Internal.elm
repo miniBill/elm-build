@@ -44,6 +44,14 @@ type alias Input =
     }
 
 
+{-| Core primitive.
+
+**CORRECTNESS:**
+
+  - The task must be deterministic,
+  - the hash must contain all the information the task depends on.
+
+-}
 derive :
     String
     -> Hash Normal
