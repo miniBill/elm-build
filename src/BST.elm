@@ -153,9 +153,7 @@ toListHelp t acc =
             acc
 
         BSTNode k l r ->
-            toListHelp r acc
-                |> (::) k
-                |> toListHelp l
+            toListHelp l (k :: toListHelp r acc)
 
 
 fromList : List comparable -> BST comparable
