@@ -487,7 +487,14 @@ fail msg =
         |> andThen
             (\_ ->
                 BuildTask "fail"
-                    (\_ _ -> BackendTask.fail (FatalError.fromString msg))
+                    (\{ prefix } _ ->
+                        BackendTask.fail
+                            (FatalError.build
+                                { title = String.join " " (prefix ++ [ "-", "build error" ])
+                                , body = msg
+                                }
+                            )
+                    )
             )
 
 
