@@ -1,4 +1,4 @@
-module BuildTask.Unsafe.Do exposing (commandWithFile, pipeThrough)
+module BuildTask.Unsafe.Do exposing (commandWithFile, downloadImmutable, pipeThrough)
 
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import BuildTask.Do exposing (andThen)
@@ -49,3 +49,17 @@ commandWithFile :
     -> BuildTask a
 commandWithFile cmd args hash k =
     BuildTask.Unsafe.commandWithFile cmd args hash |> andThen k
+
+
+{-| Downloads a file given its URL.
+
+**CORRECTNESS:**
+The file must never change on the server.
+
+-}
+downloadImmutable :
+    String
+    -> (FileOrDirectory -> BuildTask a)
+    -> BuildTask a
+downloadImmutable url k =
+    BuildTask.Unsafe.downloadImmutable url |> andThen k
