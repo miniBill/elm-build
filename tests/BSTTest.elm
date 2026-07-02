@@ -10,12 +10,12 @@ import Test exposing (Test)
 toFromList : Test
 toFromList =
     Test.describe "toList/fromList"
-        [ Test.fuzz (Fuzz.listOfLengthBetween 0 100 Fuzz.int) "fromList >> toList == identity" <| \list ->
+        [ Test.fuzz (Fuzz.listOfLengthBetween 0 10000 Fuzz.int) "fromList >> toList == identity" <| \list ->
         list
             |> BST.fromList
             |> BST.toList
             |> Expect.equal (Set.toList (Set.fromList list))
-        , Test.fuzz (bstFuzzer 100 Fuzz.int) "toList >> fromList == identity" <| \bst ->
+        , Test.fuzz (bstFuzzer 1000 Fuzz.int) "toList >> fromList == identity" <| \bst ->
         let
             rebuilt : BST Int
             rebuilt =
