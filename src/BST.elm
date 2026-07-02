@@ -1,275 +1,46 @@
 module BST exposing (BST, empty, equals, fromList, insert, member, toList, union, unionAll)
 
+import Array exposing (Array)
+import FastSet as Set exposing (Set)
+
 
 type BST a
-    = BSTNode a (BST a) (BST a)
-    | BSTLeaf
+    = BST (Set a)
 
 
 member : comparable -> BST comparable -> Bool
-member k t =
-    case t of
-        BSTLeaf ->
-            False
-
-        BSTNode nk l r ->
-            case compare k nk of
-                EQ ->
-                    True
-
-                LT ->
-                    member k l
-
-                GT ->
-                    member k r
+member k (BST t) =
+    Set.member k t
 
 
 empty : BST a
 empty =
-    BSTLeaf
+    BST Set.empty
 
 
 insert : comparable -> BST comparable -> BST comparable
-insert k t =
-    case insertHelp k t of
-        Nothing ->
-            t
-
-        Just newT ->
-            newT
-
-
-insertHelp : comparable -> BST comparable -> Maybe (BST comparable)
-insertHelp k t =
-    -- elm-review: IGNORE TCO
-    case t of
-        BSTLeaf ->
-            Just (BSTNode k BSTLeaf BSTLeaf)
-
-        BSTNode nk l r ->
-            case compare k nk of
-                EQ ->
-                    Nothing
-
-                LT ->
-                    case insertHelp k l of
-                        Nothing ->
-                            Nothing
-
-                        Just nl ->
-                            Just (BSTNode nk nl r)
-
-                GT ->
-                    case insertHelp k r of
-                        Nothing ->
-                            Nothing
-
-                        Just nr ->
-                            Just (BSTNode nk l nr)
+insert k (BST t) =
+    BST (Set.insert k t)
 
 
 union : BST comparable -> BST comparable -> BST comparable
-union l r =
-    unionHelp 0 l r
-
-
-unionHelp : Int -> BST comparable -> BST comparable -> BST comparable
-unionHelp budget l r =
-    if budget <= 200 then
-        fromSortedList (mergeSorted (toList l) (toList r) [])
-
-    else
-        case l of
-            BSTLeaf ->
-                r
-
-            BSTNode lk ll lr ->
-                let
-                    ( rl, rr ) =
-                        split lk r
-                in
-                BSTNode lk (unionHelp (budget - 1) ll rl) (unionHelp (budget - 1) lr rr)
-
-
-mergeSorted : List comparable -> List comparable -> List comparable -> List comparable
-mergeSorted l r acc =
-    case l of
-        [] ->
-            List.reverse (List.reverse r ++ acc)
-
-        lh :: lt ->
-            case r of
-                [] ->
-                    List.reverse (List.reverse l ++ acc)
-
-                rh :: rt ->
-                    case compare lh rh of
-                        EQ ->
-                            mergeSorted lt rt (lh :: acc)
-
-                        LT ->
-                            mergeSorted lt r (lh :: acc)
-
-                        GT ->
-                            mergeSorted l rt (rh :: acc)
-
-
-split : comparable -> BST comparable -> ( BST comparable, BST comparable )
-split k t =
-    case t of
-        BSTLeaf ->
-            ( BSTLeaf, BSTLeaf )
-
-        BSTNode nk l r ->
-            case compare k nk of
-                EQ ->
-                    ( l, r )
-
-                LT ->
-                    let
-                        ( ll, lr ) =
-                            split k l
-                    in
-                    ( ll, BSTNode k lr r )
-
-                GT ->
-                    let
-                        ( rl, rr ) =
-                            split k r
-                    in
-                    ( BSTNode k l rl, rr )
+union (BST l) (BST r) =
+    BST (Set.union l r)
 
 
 toList : BST a -> List a
-toList s =
-    toListHelp s []
-
-
-toListHelp : BST a -> List a -> List a
-toListHelp t acc =
-    case t of
-        BSTLeaf ->
-            acc
-
-        BSTNode k l r ->
-            toListHelp l (k :: toListHelp r acc)
+toList (BST s) =
+    Set.toList s
 
 
 fromList : List comparable -> BST comparable
 fromList list =
-    fromSortedList (List.sort list)
-
-
-fromSortedList : List a -> BST a
-fromSortedList list =
-    let
-        ( deduped, len ) =
-            unique list
-
-        layers : Int
-        layers =
-            (toFloat len + 1)
-                |> logBase 2
-                |> ceiling
-    in
-    fromSortedListHelp layers deduped
-        |> Tuple.first
-
-
-fromSortedListHelp : Int -> List a -> ( BST a, List a )
-fromSortedListHelp layers queue =
-    if layers == 0 then
-        ( BSTLeaf, queue )
-
-    else
-        let
-            ( r, afterR ) =
-                fromSortedListHelp (layers - 1) queue
-        in
-        case afterR of
-            [] ->
-                ( r, afterR )
-
-            h :: t ->
-                let
-                    ( l, afterL ) =
-                        fromSortedListHelp (layers - 1) t
-                in
-                ( BSTNode h l r, afterL )
-
-
-{-| Remove duplicate elements as long as they're next to each other.
--}
-unique : List a -> ( List a, Int )
-unique list =
-    case list of
-        [] ->
-            ( [], 0 )
-
-        h :: t ->
-            let
-                ( nh, nt, nl ) =
-                    List.foldl
-                        (\e (( l, a, len ) as prev) ->
-                            if e == l then
-                                prev
-
-                            else
-                                ( e, l :: a, len + 1 )
-                        )
-                        ( h, [], 1 )
-                        t
-            in
-            ( nh :: nt, nl )
+    BST (Set.fromList list)
 
 
 equals : BST comparable -> BST comparable -> Bool
-equals l r =
-    equalsHelp [ l ] [ r ]
-
-
-equalsHelp : List (BST a) -> List (BST a) -> Bool
-equalsHelp lq rq =
-    case lq of
-        BSTLeaf :: lt ->
-            equalsHelp lt rq
-
-        [] ->
-            case rq of
-                BSTLeaf :: rt ->
-                    equalsHelp lq rt
-
-                [] ->
-                    True
-
-                _ ->
-                    False
-
-        (BSTNode lv ll lr) :: lt ->
-            case rq of
-                BSTLeaf :: rt ->
-                    equalsHelp lq rt
-
-                [] ->
-                    False
-
-                (BSTNode rv rl rr) :: rt ->
-                    case ( ll, rl ) of
-                        ( BSTLeaf, BSTLeaf ) ->
-                            if lv == rv then
-                                equalsHelp (lr :: lt) (rr :: rt)
-
-                            else
-                                False
-
-                        ( BSTLeaf, BSTNode _ _ _ ) ->
-                            equalsHelp lq (rl :: BSTNode rv BSTLeaf rr :: rt)
-
-                        ( BSTNode _ _ _, BSTLeaf ) ->
-                            equalsHelp (ll :: BSTNode lv BSTLeaf lr :: lt) rq
-
-                        ( BSTNode _ _ _, BSTNode _ _ _ ) ->
-                            equalsHelp (ll :: BSTNode lv BSTLeaf lr :: lt) (rl :: BSTNode rv BSTLeaf rr :: rt)
+equals (BST l) (BST r) =
+    Set.equals l r
 
 
 unionAll : List (BST comparable) -> BST comparable
