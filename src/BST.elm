@@ -1,11 +1,11 @@
 module BST exposing (BST, empty, equals, fromList, insert, member, toList, union, unionAll)
 
 import Array exposing (Array)
-import FastSet as Set exposing (Set)
+import SeqSet as Set exposing (SeqSet)
 
 
 type BST a
-    = BST (Set a)
+    = BST (SeqSet a)
 
 
 member : comparable -> BST comparable -> Bool
@@ -40,7 +40,7 @@ fromList list =
 
 equals : BST comparable -> BST comparable -> Bool
 equals (BST l) (BST r) =
-    Set.equals l r
+    l == r
 
 
 unionAll : List (BST comparable) -> BST comparable
