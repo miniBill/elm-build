@@ -1,4 +1,4 @@
-module BuildTask.Unsafe exposing (commandInReadonlyDirectory, commandInWritableDirectory, commandWithFile, downloadImmutable, named, pipeThrough)
+module BuildTask.Unsafe exposing (commandInReadonlyDirectory, commandInWritableDirectory, commandInWritableDirectoryOutput, commandWithFile, downloadImmutable, named, pipeThrough)
 
 {-| -}
 
@@ -101,6 +101,8 @@ commandInReadonlyDirectory cmd args hash =
 
 {-| Run a command in a writable temporary directory seeded from a cached directory.
 
+This is similar to `commandInWritableDirectoryOutput` but returns a `FileOrDirectory` containing the output instead of the output.
+
 Unlike `commandInReadonlyDirectory` (which runs in the read-only cached directory directly),
 this creates a writable copy so the command can create temporary files
 (like `elm-stuff/` during compilation). Only stdout is captured and cached;
@@ -137,6 +139,32 @@ commandInWritableDirectory cmd args hash =
         )
     <| \output ->
     BackendTask.allowFatal (Script.writeFile { path = Hash.toPathTemporary buildPath target, body = output })
+
+
+{-| Run a command in a writable temporary directory seeded from a cached directory.
+
+This is similar to `commandInWritableDirectory` but returns the output instead of a `FileOrDirectory` containing the output.
+
+Unlike `commandInReadonlyDirectory` (which runs in the read-only cached directory directly),
+this creates a writable copy so the command can create temporary files
+(like `elm-stuff/` during compilation). Only stdout is captured and cached;
+the temporary directory is discarded after the command completes.
+
+**CORRECTNESS:**
+The command must be deterministic. The same input should correspond to the same output.
+
+In particular, the command must not:
+
+  - get data from the internet,
+  - read other files,
+  - use the current time,
+  - use any other source of randomness.
+
+-}
+commandInWritableDirectoryOutput : String -> List String -> FileOrDirectory -> BuildTask String
+commandInWritableDirectoryOutput cmd args hash =
+    BuildTask.do (commandInWritableDirectory cmd args hash) <| \target ->
+    BuildTask.withFile target BuildTask.succeed
 
 
 {-| Run a command passing in a file (or directory) as last argument and save the result to a file.
