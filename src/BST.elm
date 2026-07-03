@@ -169,7 +169,9 @@ fromSortedList list =
 
         layers : Int
         layers =
-            ceiling (logBase 2 (toFloat len + 1))
+            (toFloat len + 1)
+                |> logBase 2
+                |> ceiling
     in
     fromSortedListHelp layers deduped
         |> Tuple.first
