@@ -1,4 +1,4 @@
-module BuildTask.Internal exposing (BuildTask(..), Input, Warning, andThen, andThen2, combineBy, commandLog, derive, downloadSHA256, execLog, extendHashWith, fail, hashFromString, input, jobs, map, map2, map3, map4, map5, named, run, sequence, succeed, timed, toResult, triggerDebugger, withFile, withPrefix, withWarning)
+module BuildTask.Internal exposing (BuildTask(..), Input, State, Warning, andThen, andThen2, combineBy, commandLog, derive, downloadSHA256, execLog, extendHashWith, fail, hashFromString, input, jobs, map, map2, map3, map4, map5, named, run, sequence, succeed, timed, toResult, triggerDebugger, withFile, withPrefix, withWarning)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Customs
