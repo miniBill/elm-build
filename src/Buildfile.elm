@@ -1,4 +1,4 @@
-module Buildfile exposing (buildAction, getInputs, image, standardFormats)
+module Buildfile exposing (HashedFileWith, buildAction, getInputs, image, standardFormats)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Glob as Glob
