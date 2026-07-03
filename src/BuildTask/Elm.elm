@@ -3,11 +3,19 @@ module BuildTask.Elm exposing (codegen, format)
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import BuildTask.Do as Do
 import BuildTask.Unsafe as Unsafe
-import Elm
 import Path exposing (Path)
 
 
-codegen : Elm.File -> BuildTask { filename : Path, hash : FileOrDirectory }
+codegen :
+    { path : String
+    , contents : String
+    , warnings :
+        List
+            { declaration : String
+            , warning : String
+            }
+    }
+    -> BuildTask { filename : Path, hash : FileOrDirectory }
 codegen file =
     Do.writeFile file.contents <| \hash ->
     BuildTask.do (format hash) <| \formatted ->
