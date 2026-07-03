@@ -1,11 +1,10 @@
 module BuildTask.Tar exposing (extract, listContents)
 
-import BackendTask exposing (BackendTask)
 import BackendTask.Do
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import BuildTask.Internal as Internal
 import BuildTask.Unsafe
-import Hash exposing (Hash)
+import Hash
 import Pages.Script as Script
 
 
