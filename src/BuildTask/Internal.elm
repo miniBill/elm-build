@@ -1,4 +1,4 @@
-module BuildTask.Internal exposing (BuildTask(..), Input, State, Warning, andThen, andThen2, combineBy, commandLog, derive, downloadSHA256, execLog, extendHashWith, fail, hashFromString, input, jobs, map, map2, map3, map4, map5, named, run, sequence, succeed, timed, toResult, triggerDebugger, withFile, withPrefix, withWarning)
+module BuildTask.Internal exposing (BuildTask(..), Input, State, Warning, andThen, andThen2, combineBy, commandLog, derive, downloadSHA256, execLog, extendHashWith, fail, hashFromString, input, jobs, map, map2, map3, map4, map5, named, run, sequence, succeed, timed, toResult, triggerDebugger, withEnv, withFile, withPrefix, withWarning)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Customs
@@ -691,4 +691,25 @@ toResult (BuildTask name f) =
                             Err e ->
                                 ( Err e, deps )
                     )
+        )
+
+
+withEnv : List ( String, String ) -> BuildTask a -> BuildTask a
+withEnv env (BuildTask name f) =
+    BuildTask name
+        (\input_ state ->
+            List.foldl (\( k, v ) a -> BackendTask.withEnv k v a)
+                (f
+                    input_
+                    { state
+                        | deps =
+                            List.foldl
+                                (\( k, v ) a ->
+                                    HashSet.insert (Hash.fromString ("ENV" ++ k ++ "=" ++ v) input_.hashKind) a
+                                )
+                                state.deps
+                                env
+                    }
+                )
+                env
         )

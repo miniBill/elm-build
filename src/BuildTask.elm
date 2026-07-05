@@ -8,6 +8,7 @@ module BuildTask exposing
     , withPrefix, timed
     , Warning, withWarning, withWarnings
     , jobs, triggerDebugger, fromResult
+    , withEnv
     )
 
 {-|
@@ -56,6 +57,11 @@ module BuildTask exposing
 ## Utils
 
 @docs jobs, triggerDebugger, fromResult
+
+
+## Advanced
+
+@docs withEnv
 
 -}
 
@@ -409,3 +415,8 @@ fromResult res =
 
         Err e ->
             fail e
+
+
+withEnv : List ( String, String ) -> BuildTask a -> BuildTask a
+withEnv newEnv task =
+    Internal.withEnv newEnv task
