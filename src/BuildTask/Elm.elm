@@ -1,10 +1,23 @@
-module BuildTask.Elm exposing (codegen, format)
+module BuildTask.Elm exposing (CodegenError(..), codegen, format)
 
+import BackendTask exposing (BackendTask)
+import BackendTask.File as File
+import BackendTask.Stream as Stream
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import BuildTask.Do as Do
 import BuildTask.Unsafe as Unsafe
+import FatalError exposing (FatalError)
 import Hash
+import Pages.Script as Script
 import Path exposing (Path)
+
+
+type CodegenError
+    = FileIsEmpty
+    | ErrorWritingUnformattedFile Script.Error
+    | ErrorFormatting (Stream.Error () String)
+    | ErrorReadingFormattedFile (File.FileReadError Never)
+    | ElmFormatProducedAnEmptyFileFrom FileOrDirectory
 
 
 codegen :
@@ -16,32 +29,29 @@ codegen :
             , warning : String
             }
     }
-    -> BuildTask { filename : Path, hash : FileOrDirectory }
+    -> BuildTask { fatal : FatalError, recoverable : CodegenError } { filename : Path, hash : FileOrDirectory }
 codegen file =
-    if String.isEmpty (String.trim file.contents) then
-        if List.isEmpty file.warnings then
-            BuildTask.fail ("Will not write an empty file at " ++ file.path)
+    BuildTask.doWithError (BuildTask.writeFile file.contents) ErrorWritingUnformattedFile <| \hash ->
+    BuildTask.doWithError (format hash) ErrorFormatting <| \formatted ->
+    BuildTask.doWithError (BuildTask.withFile formatted BuildTask.succeed) ErrorReadingFormattedFile <| \content ->
+    BuildTask.do
+        (if String.isEmpty (String.trim content) then
+            FatalError.recoverable
+                { title = "Empty elm-format output"
+                , body = "elm-format produced an empty file - input was " ++ Hash.toString hash
+                }
+                (ElmFormatProducedAnEmptyFileFrom hash)
+                |> BuildTask.fail
 
-        else
-            BuildTask.fail ("Will not write an empty file at " ++ file.path ++ "\nWarnings were:" ++ String.concat (List.map (\w -> "- " ++ formatWarning w) file.warnings))
-
-    else
-        Do.writeFile file.contents <| \hash ->
-        BuildTask.do (format hash) <| \formatted ->
-        Do.withFile formatted
-            (\content ->
-                if String.isEmpty (String.trim content) then
-                    BuildTask.fail ("elm-format produced an empty file - input was " ++ Hash.toString hash)
-
-                else
-                    BuildTask.succeed ()
-            )
-        <| \() ->
-        { filename = Path.path ("generated/" ++ file.path)
-        , hash = formatted
-        }
-            |> BuildTask.succeed
-            |> BuildTask.withWarnings (List.map formatWarning file.warnings)
+         else
+            BuildTask.succeed ()
+        )
+    <| \() ->
+    { filename = Path.path ("generated/" ++ file.path)
+    , hash = formatted
+    }
+        |> BuildTask.succeed
+        |> BuildTask.withWarnings (List.map formatWarning file.warnings)
 
 
 formatWarning : { declaration : String, warning : String } -> BuildTask.Warning
@@ -49,6 +59,6 @@ formatWarning warning =
     "In declaration " ++ warning.declaration ++ ": " ++ warning.warning
 
 
-format : FileOrDirectory -> BuildTask FileOrDirectory
+format : FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error () String } FileOrDirectory
 format hash =
     Unsafe.pipeThrough "elm-format" [ "--stdin" ] hash

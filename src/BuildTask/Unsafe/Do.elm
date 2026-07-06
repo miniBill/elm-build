@@ -1,8 +1,10 @@
 module BuildTask.Unsafe.Do exposing (commandWithFile, downloadImmutable, pipeThrough)
 
+import BackendTask.Stream as Stream
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import BuildTask.Do exposing (andThen)
 import BuildTask.Unsafe
+import FatalError exposing (FatalError)
 
 
 {-| Pipe a file through a command.
@@ -22,8 +24,8 @@ pipeThrough :
     String
     -> List String
     -> FileOrDirectory
-    -> (FileOrDirectory -> BuildTask a)
-    -> BuildTask a
+    -> (FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error () String } a)
+    -> BuildTask { fatal : FatalError, recoverable : Stream.Error () String } a
 pipeThrough cmd args hash k =
     BuildTask.Unsafe.pipeThrough cmd args hash |> andThen k
 
@@ -45,8 +47,8 @@ commandWithFile :
     String
     -> List String
     -> FileOrDirectory
-    -> (FileOrDirectory -> BuildTask a)
-    -> BuildTask a
+    -> (FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error Int String } a)
+    -> BuildTask { fatal : FatalError, recoverable : Stream.Error Int String } a
 commandWithFile cmd args hash k =
     BuildTask.Unsafe.commandWithFile cmd args hash |> andThen k
 
@@ -59,7 +61,7 @@ The file must never change on the server.
 -}
 downloadImmutable :
     String
-    -> (FileOrDirectory -> BuildTask a)
-    -> BuildTask a
+    -> (FileOrDirectory -> BuildTask BuildTask.DownloadError a)
+    -> BuildTask BuildTask.DownloadError a
 downloadImmutable url k =
     BuildTask.Unsafe.downloadImmutable url |> andThen k

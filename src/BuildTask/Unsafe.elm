@@ -5,11 +5,13 @@ module BuildTask.Unsafe exposing (commandInReadonlyDirectory, commandInWritableD
 import BackendTask
 import BackendTask.Do as Do
 import BackendTask.Extra
+import BackendTask.File
 import BackendTask.File.Extra
 import BackendTask.Http as Http
 import BackendTask.Stream as Stream
-import BuildTask exposing (BuildTask, FileOrDirectory)
-import BuildTask.Internal as Internal
+import BuildTask exposing (BuildTask, DownloadError, FileOrDirectory)
+import BuildTask.Internal as Internal exposing (Error(..))
+import FatalError exposing (FatalError)
 import Hash
 import Pages.Script as Script
 
@@ -44,7 +46,7 @@ Notice how `foo` is a function but the definition doesn't specify any explicit p
 This approach is inspired by [noredink/elm-review-html-lazy](https://package.elm-lang.org/packages/noredink/elm-review-html-lazy/latest/UseMemoizedLazyLambda).
 
 -}
-named : String -> (a -> { files : List FileOrDirectory, additionalData : List String }) -> (a -> BuildTask FileOrDirectory) -> a -> BuildTask FileOrDirectory
+named : String -> (a -> { files : List FileOrDirectory, additionalData : List String }) -> (a -> BuildTask e FileOrDirectory) -> a -> BuildTask e FileOrDirectory
 named name toString action param =
     Internal.named name toString action param
 
@@ -62,7 +64,11 @@ In particular, the command must not:
   - use any other source of randomness.
 
 -}
-pipeThrough : String -> List String -> FileOrDirectory -> BuildTask FileOrDirectory
+pipeThrough :
+    String
+    -> List String
+    -> FileOrDirectory
+    -> BuildTask { fatal : FatalError, recoverable : Stream.Error () String } FileOrDirectory
 pipeThrough cmd args hash =
     BuildTask.do (Internal.extendHashWith (cmd :: args) hash) <| \outputHash ->
     Internal.derive (String.join " " ("pipeThrough" :: cmd :: args)) outputHash <| \{ prefix, buildPath } target ->
@@ -72,7 +78,8 @@ pipeThrough cmd args hash =
         (Stream.fileRead (Hash.toPath buildPath hash)
             |> Stream.pipe (Stream.command cmd args)
             |> Stream.pipe (Stream.fileWrite (Hash.toPathTemporary buildPath target))
-            |> Stream.run
+            |> Stream.readMetadata
+            |> BackendTask.mapError Internal.UserError
         )
 
 
@@ -91,12 +98,19 @@ In particular, the command must not:
   - use any other source of randomness.
 
 -}
-commandInReadonlyDirectory : String -> List String -> FileOrDirectory -> BuildTask FileOrDirectory
+commandInReadonlyDirectory : String -> List String -> FileOrDirectory -> BuildTask (Stream.Error Int String) FileOrDirectory
 commandInReadonlyDirectory cmd args hash =
     BuildTask.do (Internal.extendHashWith (cmd :: args) hash) <| \outputHash ->
     Internal.derive (String.join " " ("commandInReadonlyDirectory" :: cmd :: args)) outputHash <| \{ prefix, buildPath } target ->
-    Do.do (Internal.commandLog prefix cmd args |> BackendTask.inDir (Hash.toPath buildPath hash)) <| \output ->
-    BackendTask.allowFatal (Script.writeFile { path = Hash.toPathTemporary buildPath target, body = output })
+    Do.do
+        (Internal.commandLog prefix cmd args
+            |> BackendTask.inDir (Hash.toPath buildPath hash)
+            |> BackendTask.mapError (\{ recoverable } -> Internal.UserError recoverable)
+        )
+    <| \output ->
+    Script.writeFile { path = Hash.toPathTemporary buildPath target, body = output }
+        |> BackendTask.allowFatal
+        |> BackendTask.mapError Internal.InternalError
 
 
 {-| Run a command in a writable temporary directory seeded from a cached directory.
@@ -119,7 +133,7 @@ In particular, the command must not:
   - use any other source of randomness.
 
 -}
-commandInWritableDirectory : String -> List String -> FileOrDirectory -> BuildTask FileOrDirectory
+commandInWritableDirectory : String -> List String -> FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error Int String } FileOrDirectory
 commandInWritableDirectory cmd args hash =
     BuildTask.do (Internal.extendHashWith (cmd :: args) hash) <| \outputHash ->
     Internal.derive (String.join " " ("commandInWritableDirectory" :: cmd :: args)) outputHash <| \{ prefix, buildPath } target ->
@@ -128,17 +142,34 @@ commandInWritableDirectory cmd args hash =
         workspacePath =
             Hash.toPathWorkspace buildPath (Hash.toWorkspace target)
     in
-    Do.do (BackendTask.File.Extra.removeFileIfExists workspacePath) <| \_ ->
-    Do.exec "cp" [ "-r", Hash.toPath buildPath hash, workspacePath ] <| \_ ->
-    Do.exec "chmod" [ "-R", "u+w", workspacePath ] <| \_ ->
+    Do.do
+        (BackendTask.File.Extra.removeFileIfExists workspacePath
+            |> BackendTask.mapError Internal.InternalError
+        )
+    <| \_ ->
+    Do.do
+        (Script.exec "cp" [ "-r", Hash.toPath buildPath hash, workspacePath ]
+            |> BackendTask.mapError Internal.InternalError
+        )
+    <| \_ ->
+    Do.do
+        (Script.exec "chmod" [ "-R", "u+w", workspacePath ]
+            |> BackendTask.mapError Internal.InternalError
+        )
+    <| \_ ->
     Do.do
         (Internal.commandLog prefix cmd args
             |> BackendTask.inDir workspacePath
+            |> BackendTask.mapError Internal.UserError
             |> BackendTask.Extra.finally
-                (BackendTask.File.Extra.removeFileIfExists workspacePath)
+                (BackendTask.File.Extra.removeFileIfExists workspacePath
+                    |> BackendTask.mapError Internal.InternalError
+                )
         )
     <| \output ->
-    BackendTask.allowFatal (Script.writeFile { path = Hash.toPathTemporary buildPath target, body = output })
+    Script.writeFile { path = Hash.toPathTemporary buildPath target, body = output }
+        |> BackendTask.allowFatal
+        |> BackendTask.mapError Internal.InternalError
 
 
 {-| Run a command in a writable temporary directory seeded from a cached directory.
@@ -161,10 +192,24 @@ In particular, the command must not:
   - use any other source of randomness.
 
 -}
-commandInWritableDirectoryOutput : String -> List String -> FileOrDirectory -> BuildTask String
+commandInWritableDirectoryOutput : String -> List String -> FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error (Result Int (BackendTask.File.FileReadError Never)) String } String
 commandInWritableDirectoryOutput cmd args hash =
-    BuildTask.do (commandInWritableDirectory cmd args hash) <| \target ->
+    BuildTask.do
+        (commandInWritableDirectory cmd args hash
+            |> BuildTask.mapRecoverableError
+                (\recoverable ->
+                    case recoverable of
+                        Stream.StreamError e ->
+                            Stream.StreamError e
+
+                        Stream.CustomError e b ->
+                            Stream.CustomError (Err e) b
+                )
+        )
+    <| \target ->
     BuildTask.withFile target BuildTask.succeed
+        |> BuildTask.mapRecoverableError
+            (\recoverable -> Stream.CustomError (Ok recoverable) Nothing)
 
 
 {-| Run a command passing in a file (or directory) as last argument and save the result to a file.
@@ -184,12 +229,18 @@ commandWithFile :
     String
     -> List String
     -> FileOrDirectory
-    -> BuildTask FileOrDirectory
+    -> BuildTask { fatal : FatalError, recoverable : Stream.Error Int String } FileOrDirectory
 commandWithFile cmd args hash =
     BuildTask.do (Internal.extendHashWith (cmd :: args) hash) <| \outputHash ->
     Internal.derive (String.join " " ("commandWithFile" :: cmd :: args)) outputHash <| \{ prefix, buildPath } target ->
-    Do.do (Internal.commandLog prefix cmd (args ++ [ Hash.toPath buildPath hash ])) <| \output ->
-    BackendTask.allowFatal (Script.writeFile { path = Hash.toPathTemporary buildPath target, body = output })
+    Do.do
+        (Internal.commandLog prefix cmd (args ++ [ Hash.toPath buildPath hash ])
+            |> BackendTask.mapError Internal.UserError
+        )
+    <| \output ->
+    Script.writeFile { path = Hash.toPathTemporary buildPath target, body = output }
+        |> BackendTask.allowFatal
+        |> BackendTask.mapError Internal.InternalError
 
 
 {-| Downloads a file given its URL.
@@ -198,7 +249,7 @@ commandWithFile cmd args hash =
 The file must never change on the server.
 
 -}
-downloadImmutable : String -> BuildTask FileOrDirectory
+downloadImmutable : String -> BuildTask DownloadError FileOrDirectory
 downloadImmutable url =
     BuildTask.do (Internal.hashFromString url) <| \outputHash ->
     Internal.derive ("downloadImmutable " ++ url) outputHash <| \{ buildPath } target ->
@@ -212,3 +263,4 @@ downloadImmutable url =
         }
         |> Stream.pipe (Stream.fileWrite (Hash.toPathTemporary buildPath target))
         |> Stream.run
+        |> BackendTask.mapError (\e -> Internal.UserError (BuildTask.DownloadError e))

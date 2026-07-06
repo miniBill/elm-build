@@ -1,5 +1,5 @@
 module BuildTask exposing
-    ( BuildTask
+    ( BuildTask, Error(..)
     , FileOrDirectory, input, inputs, downloadSHA256
     , do, succeed, fail
     , writeFile, run
@@ -9,6 +9,7 @@ module BuildTask exposing
     , Warning, withWarning, withWarnings
     , jobs, triggerDebugger, fromResult
     , withEnv
+    , DownloadError(..), allowFatal, doWithError, mapError, mapRecoverableError
     )
 
 {-|
@@ -16,7 +17,7 @@ module BuildTask exposing
 
 ## Types
 
-@docs BuildTask
+@docs BuildTask, Error
 
 
 ## Input
@@ -68,10 +69,11 @@ module BuildTask exposing
 import BackendTask exposing (BackendTask)
 import BackendTask.Do as Do
 import BackendTask.Extra
+import BackendTask.File as File
 import BuildTask.Internal as Internal
 import FastDict as Dict exposing (Dict)
 import FastSet exposing (Set)
-import FatalError exposing (FatalError)
+import FatalError exposing (FatalError, recoverable)
 import Hash exposing (Hash)
 import Pages.Script as Script
 import Path exposing (Path)
@@ -79,8 +81,14 @@ import Result.Extra
 
 
 {-| -}
-type alias BuildTask a =
-    Internal.BuildTask a
+type alias BuildTask e a =
+    Internal.BuildTask e a
+
+
+{-| -}
+type Error e
+    = InternalError FatalError
+    | UserError e
 
 
 type alias FileOrDirectory =
@@ -92,13 +100,13 @@ type alias Warning =
 
 
 {-| -}
-succeed : a -> BuildTask a
+succeed : a -> BuildTask e a
 succeed v =
     Internal.succeed v
 
 
 {-| -}
-map : (a -> b) -> BuildTask a -> BuildTask b
+map : (a -> b) -> BuildTask e a -> BuildTask e b
 map f m =
     Internal.map f m
 
@@ -106,9 +114,9 @@ map f m =
 {-| -}
 map2 :
     (a -> b -> c)
-    -> BuildTask a
-    -> BuildTask b
-    -> BuildTask c
+    -> BuildTask e a
+    -> BuildTask e b
+    -> BuildTask e c
 map2 f a b =
     Internal.map2 f a b
 
@@ -116,76 +124,105 @@ map2 f a b =
 {-| -}
 map3 :
     (a -> b -> c -> d)
-    -> BuildTask a
-    -> BuildTask b
-    -> BuildTask c
-    -> BuildTask d
+    -> BuildTask e a
+    -> BuildTask e b
+    -> BuildTask e c
+    -> BuildTask e d
 map3 f a b c =
     Internal.map3 f a b c
 
 
 {-| -}
 map4 :
-    (a -> b -> c -> d -> e)
-    -> BuildTask a
-    -> BuildTask b
-    -> BuildTask c
-    -> BuildTask d
-    -> BuildTask e
+    (a -> b -> c -> d -> f)
+    -> BuildTask e a
+    -> BuildTask e b
+    -> BuildTask e c
+    -> BuildTask e d
+    -> BuildTask e f
 map4 f a b c d =
     Internal.map4 f a b c d
 
 
 {-| -}
 map5 :
-    (a -> b -> c -> d -> e -> f)
-    -> BuildTask a
-    -> BuildTask b
-    -> BuildTask c
-    -> BuildTask d
-    -> BuildTask e
-    -> BuildTask f
+    (a -> b -> c -> d -> f -> g)
+    -> BuildTask e a
+    -> BuildTask e b
+    -> BuildTask e c
+    -> BuildTask e d
+    -> BuildTask e f
+    -> BuildTask e g
 map5 f a b c d e =
     Internal.map5 f a b c d e
 
 
 {-| -}
-andThen : (a -> BuildTask b) -> BuildTask a -> BuildTask b
+mapError : (e -> f) -> BuildTask e a -> BuildTask f a
+mapError f t =
+    Internal.mapError f t
+
+
+{-| -}
+andThen : (a -> BuildTask e b) -> BuildTask e a -> BuildTask e b
 andThen f m =
     Internal.andThen f m
 
 
 andThen2 :
-    (a -> b -> BuildTask c)
-    -> BuildTask a
-    -> BuildTask b
-    -> BuildTask c
+    (a -> b -> BuildTask e c)
+    -> BuildTask e a
+    -> BuildTask e b
+    -> BuildTask e c
 andThen2 f l r =
     Internal.andThen2 f l r
 
 
 {-| -}
-fail : String -> BuildTask a
+fail : e -> BuildTask e a
 fail msg =
     Internal.fail msg
 
 
 {-| -}
-triggerDebugger : BuildTask ()
+triggerDebugger : BuildTask e ()
 triggerDebugger =
     Internal.triggerDebugger
 
 
 {-| -}
-input : Path -> BuildTask FileOrDirectory
+input : Path -> BuildTask FatalError FileOrDirectory
 input inputPath =
     Internal.input inputPath
 
 
 {-| -}
-downloadSHA256 : { url : String, sha256 : String } -> BuildTask FileOrDirectory
+type DownloadError
+    = WrongHashLength String
+    | InvalidHashHex String
+    | DownloadError FatalError
+    | WrongHash { expected : String, actual : String }
+
+
+{-| -}
+downloadSHA256 : { url : String, sha256 : String } -> BuildTask DownloadError FileOrDirectory
 downloadSHA256 config =
     Internal.downloadSHA256 config
+        |> mapError
+            (\e ->
+                case e of
+                    Internal.WrongHashLength hash ->
+                        WrongHashLength hash
+
+                    Internal.InvalidHashHex d ->
+                        InvalidHashHex d
+
+                    Internal.DownloadError d ->
+                        DownloadError d
+
+                    Internal.WrongHash d ->
+                        WrongHash d
+            )
 
 
 {-| -}
@@ -196,19 +233,27 @@ inputs :
             FatalError
             (List
                 ( Path
-                , BuildTask FileOrDirectory
+                , BuildTask e FileOrDirectory
                 )
             )
 inputs inputPaths =
     -- TODO: copy the files inside the build path _before_ hashing
-    Do.do (Internal.commandLog [] "b3sum" (List.map Path.toString inputPaths)) <| \body ->
+    Do.do
+        (Internal.commandLog [] "b3sum" (List.map Path.toString inputPaths)
+            |> BackendTask.allowFatal
+        )
+    <| \body ->
     List.map2
         (\inputPath line ->
             case Hash.fromChecksum line of
                 Ok hash ->
                     ( inputPath
                     , Internal.derive "inputs" hash <| \{ prefix, buildPath } target ->
-                    Internal.execLog prefix "cp" [ Path.toString inputPath, Hash.toPathTemporary buildPath target ]
+                    Script.copyFile
+                        { from = Path.toString inputPath
+                        , to = Hash.toPathTemporary buildPath target
+                        }
+                        |> BackendTask.mapError Internal.InternalError
                     )
                         |> Ok
 
@@ -229,7 +274,7 @@ type Tree
 
 
 {-| -}
-combineInto : List { filename : Path, hash : FileOrDirectory } -> BuildTask FileOrDirectory
+combineInto : List { filename : Path, hash : FileOrDirectory } -> BuildTask e FileOrDirectory
 combineInto files =
     files
         |> buildTree
@@ -288,7 +333,7 @@ buildTree files =
     List.foldl addFile emptyTree files
 
 
-combineTree : Tree -> BuildTask FileOrDirectory
+combineTree : Tree -> BuildTask e FileOrDirectory
 combineTree (Tree tree) =
     do jobs <| \parallelism ->
     do
@@ -303,7 +348,7 @@ combineTree (Tree tree) =
         combined =
             Dict.union tree.files subtrees
 
-        outputHash : BuildTask FileOrDirectory
+        outputHash : BuildTask e FileOrDirectory
         outputHash =
             Dict.foldl
                 (\filename hash acc -> filename :: Hash.toString hash :: acc)
@@ -314,100 +359,127 @@ combineTree (Tree tree) =
     in
     do outputHash <| \combinedHash ->
     Internal.derive "combine" combinedHash <| \{ prefix, buildPath } target ->
-    Do.do (Internal.execLog prefix "mkdir" [ "-p", Hash.toPathTemporary buildPath target ]) <| \_ ->
+    Do.do
+        (Script.makeDirectory { recursive = True } (Hash.toPathTemporary buildPath target)
+            |> BackendTask.mapError Internal.InternalError
+        )
+    <| \_ ->
     combined
         |> Dict.foldl (\outputFilename hash acc -> Internal.execLog prefix "cp" [ "-rl", Hash.toPath buildPath hash, Hash.toPathTemporary buildPath target ++ "/" ++ outputFilename ] :: acc) []
         |> BackendTask.Extra.combineBy_ parallelism
+        |> BackendTask.mapError Internal.InternalError
 
 
 {-| -}
-do : BuildTask b -> (b -> BuildTask a) -> BuildTask a
+do : BuildTask e b -> (b -> BuildTask e a) -> BuildTask e a
 do x f =
     andThen f x
 
 
+doWithError :
+    BuildTask { recoverable : e, fatal : FatalError } a
+    -> (e -> f)
+    -> (a -> BuildTask { recoverable : f, fatal : FatalError } b)
+    -> BuildTask { recoverable : f, fatal : FatalError } b
+doWithError x e f =
+    andThen f (mapRecoverableError e x)
+
+
 {-| -}
-withFile : FileOrDirectory -> (String -> BuildTask a) -> BuildTask a
+withFile :
+    FileOrDirectory
+    -> (String -> BuildTask { fatal : FatalError, recoverable : File.FileReadError decoderError } a)
+    -> BuildTask { fatal : FatalError, recoverable : File.FileReadError decoderError } a
 withFile hash f =
     Internal.withFile hash f
 
 
 {-| -}
-writeFile : String -> BuildTask FileOrDirectory
+writeFile : String -> BuildTask { fatal : FatalError, recoverable : Script.Error } FileOrDirectory
 writeFile content =
     do (Internal.hashFromString content) <| \hash ->
     Internal.derive "writeFile" hash <| \{ buildPath } target ->
-    BackendTask.allowFatal (Script.writeFile { path = Hash.toPathTemporary buildPath target, body = content })
+    Script.writeFile { path = Hash.toPathTemporary buildPath target, body = content }
+        |> BackendTask.mapError Internal.UserError
 
 
 {-| -}
 run :
     { jobs : Maybe Int, debug : Bool, check : Bool, hashKind : Hash.Kind }
     -> Path
-    -> BuildTask FileOrDirectory
-    -> BackendTask FatalError { output : Path, intermediate : List Path, warnings : Set Warning }
+    -> BuildTask e FileOrDirectory
+    -> BackendTask (Error e) { output : Path, intermediate : List Path, warnings : Set Warning }
 run config buildPath m =
     Internal.run config buildPath m
+        |> BackendTask.mapError
+            (\e ->
+                case e of
+                    Internal.InternalError i ->
+                        InternalError i
+
+                    Internal.UserError u ->
+                        UserError u
+            )
 
 
 {-| -}
-combineBy : Int -> List (BuildTask a) -> BuildTask (List a)
+combineBy : Int -> List (BuildTask e a) -> BuildTask e (List a)
 combineBy n ops =
     Internal.combineBy n ops
 
 
 {-| -}
-combine : List (BuildTask a) -> BuildTask (List a)
+combine : List (BuildTask e a) -> BuildTask e (List a)
 combine inputs_ =
     do jobs <| \parallelism ->
     combineBy parallelism inputs_
 
 
 {-| -}
-each : List a -> (a -> BuildTask b) -> BuildTask (List b)
+each : List a -> (a -> BuildTask e b) -> BuildTask e (List b)
 each l f =
     l |> List.map f |> sequence
 
 
 {-| -}
-sequence : List (BuildTask a) -> BuildTask (List a)
+sequence : List (BuildTask e a) -> BuildTask e (List a)
 sequence ops =
     Internal.sequence ops
 
 
 {-| -}
-timed : String -> String -> BuildTask a -> BuildTask a
+timed : String -> String -> BuildTask e a -> BuildTask e a
 timed before after task =
     Internal.timed before after task
 
 
 {-| -}
-withPrefix : String -> BuildTask a -> BuildTask a
+withPrefix : String -> BuildTask e a -> BuildTask e a
 withPrefix newPrefix m =
     Internal.withPrefix newPrefix m
 
 
-jobs : BuildTask Int
+jobs : BuildTask e Int
 jobs =
     Internal.jobs
 
 
-toResult : BuildTask a -> BuildTask (Result FatalError a)
+toResult : BuildTask e a -> BuildTask x (Result e a)
 toResult task =
     Internal.toResult task
 
 
-withWarnings : List Warning -> BuildTask a -> BuildTask a
+withWarnings : List Warning -> BuildTask e a -> BuildTask e a
 withWarnings warnings task =
     List.foldl withWarning task warnings
 
 
-withWarning : Warning -> BuildTask a -> BuildTask a
+withWarning : Warning -> BuildTask e a -> BuildTask e a
 withWarning warning task =
     Internal.withWarning warning task
 
 
-fromResult : Result String a -> BuildTask a
+fromResult : Result e a -> BuildTask e a
 fromResult res =
     case res of
         Ok o ->
@@ -417,6 +489,21 @@ fromResult res =
             fail e
 
 
-withEnv : List ( String, String ) -> BuildTask a -> BuildTask a
+withEnv : List ( String, String ) -> BuildTask e a -> BuildTask e a
 withEnv newEnv task =
     Internal.withEnv newEnv task
+
+
+{-| -}
+mapRecoverableError :
+    (e -> f)
+    -> BuildTask { fatal : FatalError, recoverable : e } a
+    -> BuildTask { fatal : FatalError, recoverable : f } a
+mapRecoverableError f task =
+    mapError (\{ fatal, recoverable } -> { fatal = fatal, recoverable = f recoverable }) task
+
+
+{-| -}
+allowFatal : BuildTask { e | fatal : FatalError } a -> BuildTask FatalError a
+allowFatal task =
+    Internal.allowFatal task

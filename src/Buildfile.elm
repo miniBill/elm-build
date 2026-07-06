@@ -4,7 +4,7 @@ import BackendTask exposing (BackendTask)
 import BackendTask.Glob as Glob
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import BuildTask.Do as Do
-import BuildTask.Elm as Elm
+import BuildTask.Elm as Elm exposing (CodegenError)
 import BuildTask.Font as Font
 import BuildTask.Image as Image
 import BuildTask.Unsafe as Unsafe
@@ -26,6 +26,7 @@ import Gen.String
 import Json.Encode
 import List.Extra
 import Maybe.Extra
+import Pages.Script as Script
 import Path exposing (Path)
 import String.Extra
 
@@ -47,7 +48,7 @@ type alias HashedFileWith a =
     }
 
 
-getInputs : { a | inputDirectory : Path } -> BackendTask FatalError (List ( Path, BuildTask FileOrDirectory ))
+getInputs : { a | inputDirectory : Path } -> BackendTask FatalError (List ( Path, BuildTask e FileOrDirectory ))
 getInputs config =
     Glob.fromStringWithOptions
         (let
@@ -71,7 +72,7 @@ type T4 a b c d
     = T4 a b c d
 
 
-buildAction : { config | inputDirectory : Path } -> List ( Path, BuildTask FileOrDirectory ) -> BuildTask FileOrDirectory
+buildAction : { config | inputDirectory : Path } -> List ( Path, BuildTask FatalError FileOrDirectory ) -> BuildTask FatalError FileOrDirectory
 buildAction config inputs =
     let
         inputSize : Int
@@ -79,10 +80,9 @@ buildAction config inputs =
             List.length inputs
     in
     BuildTask.do
-        (Do.jobs <| \parallelism ->
-        inputs
+        (inputs
             |> List.indexedMap (processFile config inputSize)
-            |> BuildTask.combineBy parallelism
+            |> BuildTask.combine
             |> BuildTask.map Maybe.Extra.values
         )
     <| \processedFiles ->
@@ -99,7 +99,7 @@ buildAction config inputs =
         imageFiles =
             List.filterMap asImage processedFiles
 
-        publicFolder : BuildTask FileOrDirectory
+        publicFolder : BuildTask { fatal : FatalError, recoverable : Script.Error } FileOrDirectory
         publicFolder =
             Do.writeFile (Font.toCssFile fontFiles) <| \fontsCssHash ->
             ({ filename = Path.path "fonts.css"
@@ -112,9 +112,9 @@ buildAction config inputs =
     in
     Do.map4 T4
         (imagesElmFile processedFiles)
-        (Elm.codegen (fontsElmFile fontFiles))
+        (Elm.codegen (fontsElmFile fontFiles) |> BuildTask.allowFatal)
         (imagesSizesFile imageFiles)
-        publicFolder
+        (publicFolder |> BuildTask.allowFatal)
     <| \(T4 imagesElm fontsElm imageSizes public) ->
     BuildTask.combineInto
         [ { filename = Path.path "generated/Images.elm", hash = imagesElm }
@@ -161,7 +161,7 @@ imagesSizesFile :
         { a
             | original : HashedFileWith { width : Int, height : Int }
         }
-    -> BuildTask FileOrDirectory
+    -> BuildTask FatalError FileOrDirectory
 imagesSizesFile processedFiles =
     let
         content : String
@@ -184,6 +184,7 @@ imagesSizesFile processedFiles =
                 |> String.join "\n"
     in
     BuildTask.writeFile content
+        |> BuildTask.allowFatal
 
 
 fontsElmFile : List (HashedFileWith Font.Data) -> Elm.File
@@ -198,7 +199,7 @@ fontsElmFile files =
         |> Elm.file [ "Fonts" ]
 
 
-imagesElmFile : List ProcessedFile -> BuildTask FileOrDirectory
+imagesElmFile : List ProcessedFile -> BuildTask FatalError FileOrDirectory
 imagesElmFile list =
     list
         |> List.filterMap
@@ -249,8 +250,8 @@ imagesElmFile list =
                             |> (::) (toPicture.declaration |> Elm.expose)
                             |> Elm.file [ "Images" ]
                 in
-                Do.writeFile file.contents <| \hash ->
-                Elm.format hash
+                Do.allowFatal (BuildTask.writeFile file.contents) <| \hash ->
+                BuildTask.allowFatal (Elm.format hash)
             )
 
 
@@ -302,7 +303,7 @@ processedFileToFileList file =
             [ extract data ]
 
 
-processFile : { config | inputDirectory : Path } -> Int -> Int -> ( Path, BuildTask FileOrDirectory ) -> BuildTask (Maybe ProcessedFile)
+processFile : { config | inputDirectory : Path } -> Int -> Int -> ( Path, BuildTask FatalError FileOrDirectory ) -> BuildTask FatalError (Maybe ProcessedFile)
 processFile config total index ( path, copyFile ) =
     let
         relative : Path
@@ -318,7 +319,7 @@ processFile config total index ( path, copyFile ) =
                 ++ String.fromInt total
                 ++ "]"
 
-        doImage : () -> BuildTask (Maybe ProcessedFile)
+        doImage : () -> BuildTask FatalError (Maybe ProcessedFile)
         doImage () =
             BuildTask.do copyFile <| \hash ->
             BuildTask.do (image relative hash) <| \data ->
@@ -327,10 +328,10 @@ processFile config total index ( path, copyFile ) =
                 |> Just
                 |> BuildTask.succeed
 
-        doSvg : () -> BuildTask (Maybe ProcessedFile)
+        doSvg : () -> BuildTask FatalError (Maybe ProcessedFile)
         doSvg () =
             BuildTask.do copyFile <| \hash ->
-            BuildTask.do (Image.getSvgSize hash) <| \size ->
+            Do.allowFatal (Image.getSvgSize hash) <| \size ->
             { filename = relative
             , hash = hash
             , width = size.width
@@ -340,10 +341,10 @@ processFile config total index ( path, copyFile ) =
                 |> Just
                 |> BuildTask.succeed
 
-        doFont : () -> BuildTask (Maybe ProcessedFile)
+        doFont : () -> BuildTask FatalError (Maybe ProcessedFile)
         doFont () =
             BuildTask.do copyFile <| \hash ->
-            BuildTask.do (Font.parse hash) <| \fontData ->
+            Do.allowFatal (Font.parse hash) <| \fontData ->
             { style = fontData.style
             , weight = fontData.weight
             , family = fontData.family
@@ -409,17 +410,18 @@ image :
     -> FileOrDirectory
     ->
         BuildTask
+            FatalError
             { original : { width : Int, height : Int, filename : Path, hash : FileOrDirectory }
             , converted : List (HashedFileWith { width : Int })
             }
 image relative copied =
     case Path.extension relative of
         Nothing ->
-            BuildTask.fail ("Missing extension in " ++ Path.toString relative)
+            BuildTask.fail (FatalError.fromString ("Missing extension in " ++ Path.toString relative))
 
         Just originalExtension ->
             let
-                parseSizeFile : String -> BuildTask { width : Int, height : Int, sizes : List Int }
+                parseSizeFile : String -> BuildTask FatalError { width : Int, height : Int, sizes : List Int }
                 parseSizeFile sizeString =
                     case String.split " " sizeString |> List.map String.toInt of
                         [ Just width, Just height ] ->
@@ -440,7 +442,7 @@ image relative copied =
                                 msg =
                                     "Could not parse size file: " ++ Json.Encode.encode 0 (Json.Encode.string sizeString)
                             in
-                            BuildTask.fail msg
+                            BuildTask.fail (FatalError.fromString msg)
 
                 convertAndResize :
                     FileOrDirectory
@@ -450,7 +452,7 @@ image relative copied =
                         , sizes : List Int
                         }
                     -> { a | extension : String }
-                    -> BuildTask (List (HashedFileWith { width : Int }))
+                    -> BuildTask FatalError (List (HashedFileWith { width : Int }))
                 convertAndResize stripped sizeData { extension } =
                     convertTo extension ( stripped, originalExtension ) <| \converted ->
                     BuildTask.each sizeData.sizes (doResize converted sizeData extension)
@@ -464,13 +466,14 @@ image relative copied =
                         }
                     -> String
                     -> Int
-                    -> BuildTask (HashedFileWith { width : Int })
+                    -> BuildTask FatalError (HashedFileWith { width : Int })
                 doResize input sizeData newExtension newWidth =
                     (if newWidth == sizeData.width then
                         BuildTask.succeed input
 
                      else
                         Unsafe.pipeThrough "magick" [ "-", "-resize", String.fromInt newWidth ++ "x" ++ String.fromInt sizeData.height, "-" ] input
+                            |> BuildTask.allowFatal
                     )
                         |> BuildTask.map
                             (\resized ->
@@ -487,9 +490,10 @@ image relative copied =
                                 }
                             )
             in
-            BuildTask.do (Image.stripMetadata copied) <| \stripped ->
-            BuildTask.do (Image.getSize stripped) <| \sizeFile ->
-            Do.withFile sizeFile parseSizeFile <| \sizeData ->
+            Do.allowFatal (Image.stripMetadata copied) <| \stripped ->
+            Do.allowFatal (Image.getSize stripped) <| \sizeFile ->
+            Do.allowFatal (BuildTask.withFile sizeFile BuildTask.succeed) <| \sizeFileContent ->
+            BuildTask.do (parseSizeFile sizeFileContent) <| \sizeData ->
             Do.each standardFormats.list (convertAndResize stripped sizeData) <| \converted ->
             BuildTask.succeed
                 { original =
@@ -554,14 +558,15 @@ getSizes_ =
 convertTo :
     String
     -> ( FileOrDirectory, String )
-    -> (FileOrDirectory -> BuildTask a)
-    -> BuildTask a
+    -> (FileOrDirectory -> BuildTask FatalError a)
+    -> BuildTask FatalError a
 convertTo format ( cached, originalExtension ) k =
     if originalExtension == format then
         k cached
 
     else
-        Do.pipeThrough "magick" [ "-", format ++ ":-" ] cached k
+        BuildTask.allowFatal (Unsafe.pipeThrough "magick" [ "-", format ++ ":-" ] cached)
+            |> BuildTask.andThen k
 
 
 standardFormats :

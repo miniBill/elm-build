@@ -1,9 +1,14 @@
 module BuildTask.Font exposing (Data, Style(..), Weight(..), parse, styleToString, toCssFile, weightToNumber)
 
+import BackendTask.File as File
+import BackendTask.Stream as Stream
 import BuildTask exposing (BuildTask, FileOrDirectory)
+import BuildTask.Unsafe as Unsafe
 import BuildTask.Unsafe.Do as Do
+import FatalError exposing (FatalError, recoverable)
 import Path exposing (Path)
 import String.Multiline
+import Utils
 
 
 type alias Data =
@@ -75,10 +80,10 @@ weightToNumber weight =
             900
 
 
-parse : FileOrDirectory -> BuildTask Data
+parse : FileOrDirectory -> BuildTask { recoverable : FontError, fatal : FatalError } Data
 parse hash =
     let
-        readFontData : String -> BuildTask Data
+        readFontData : String -> BuildTask { fatal : FatalError, recoverable : FontError } Data
         readFontData familyAndStyle =
             case String.split " || " familyAndStyle of
                 [ family, styleAndWeight ] ->
@@ -94,13 +99,27 @@ parse hash =
                             BuildTask.fail e
 
                 _ ->
-                    BuildTask.fail ("Failed to parse family and style: " ++ familyAndStyle)
+                    FatalError.recoverable
+                        { title = "Failed to parse family and style"
+                        , body = "Failed to parse " ++ Utils.escape familyAndStyle
+                        }
+                        (FailedToParseFamilyAndStyle familyAndStyle)
+                        |> BuildTask.fail
     in
-    Do.commandWithFile "fc-scan" [ "--format", "%{family[0]} || %{style[0]}" ] hash <| \familyAndStyleFile ->
-    BuildTask.withFile familyAndStyleFile readFontData
+    BuildTask.doWithError (Unsafe.commandWithFile "fc-scan" [ "--format", "%{family[0]} || %{style[0]}" ] hash) FailedToRunFcScan <| \familyAndStyleFile ->
+    BuildTask.doWithError (BuildTask.withFile familyAndStyleFile BuildTask.succeed) FailedToReadFile <| \familyAndStyle ->
+    readFontData familyAndStyle
 
 
-parseStyleAndWeight : String -> Result String { style : Style, weight : Weight }
+type FontError
+    = UnrecognizedStyleOrWeight String
+    | StreamError String
+    | FailedToParseFamilyAndStyle String
+    | FailedToReadFile (File.FileReadError Never)
+    | FailedToRunFcScan (Stream.Error Int String)
+
+
+parseStyleAndWeight : String -> Result { fatal : FatalError, recoverable : FontError } { style : Style, weight : Weight }
 parseStyleAndWeight styleAndWeight =
     styleAndWeight
         |> String.split " "
@@ -146,7 +165,12 @@ parseStyleAndWeight styleAndWeight =
                                 Ok { a | weight = WeightThin }
 
                             _ ->
-                                Err ("Failed to parse style fragment: \"" ++ e ++ "\"")
+                                FatalError.recoverable
+                                    { title = "Unrecognized style of weight"
+                                    , body = "Unrecognized style or weight: " ++ Utils.escape e
+                                    }
+                                    (UnrecognizedStyleOrWeight e)
+                                    |> Err
                     )
             )
             (Ok { style = StyleNormal, weight = WeightNormal })
