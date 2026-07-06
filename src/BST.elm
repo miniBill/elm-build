@@ -43,6 +43,7 @@ insert k t =
 
 insertHelp : comparable -> BST comparable -> Maybe (BST comparable)
 insertHelp k t =
+    -- elm-review: IGNORE TCO
     case t of
         BSTLeaf ->
             Just (BSTNode k BSTLeaf BSTLeaf)
