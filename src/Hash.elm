@@ -101,4 +101,4 @@ fromString raw hashKind =
                             -- Crash
                             modBy 0 0
                     in
-                    fromString raw hashKind
+                    fromString raw Secure
