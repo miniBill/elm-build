@@ -493,7 +493,7 @@ nproc =
                             let
                                 message : String
                                 message =
-                                    "Invalid " ++ String.join " " (cmd :: args) ++ " output: " ++ Json.Encode.encode 0 (Json.Encode.string trimmed)
+                                    "Invalid " ++ String.join " " (cmd :: args) ++ " output: " ++ Utils.escape trimmed)
                             in
                             BackendTask.fail (FatalError.fromString message)
 

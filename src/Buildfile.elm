@@ -29,6 +29,7 @@ import Maybe.Extra
 import Pages.Script as Script
 import Path exposing (Path)
 import String.Extra
+import Utils
 
 
 type ProcessedFile
@@ -440,7 +441,7 @@ image relative copied =
                             let
                                 msg : String
                                 msg =
-                                    "Could not parse size file: " ++ Json.Encode.encode 0 (Json.Encode.string sizeString)
+                                    "Could not parse size file: " ++ Utils.escape sizeString
                             in
                             BuildTask.fail (FatalError.fromString msg)
 
