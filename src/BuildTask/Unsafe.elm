@@ -16,6 +16,7 @@ import FatalError exposing (FatalError)
 import Hash
 import Pages.Script as Script
 import Path
+import Utils
 
 
 {-| Defines a named step. This function is useful to define steps where a computation is expensive,
@@ -73,10 +74,10 @@ pipeThrough :
     -> BuildTask { fatal : FatalError, recoverable : Stream.Error () String } FileOrDirectory
 pipeThrough cmd args hash =
     BuildTask.do (Internal.extendHashWith (cmd :: args) hash) <| \outputHash ->
-    Internal.derive (String.join " " ("pipeThrough" :: cmd :: args)) outputHash <| \{ prefix, buildPath } target ->
+    Internal.derive (String.join " " ("pipeThrough" :: cmd :: args)) outputHash <| \{ prefix, buildPath, env } target ->
     BackendTask.Extra.timed
-        (String.join " " (prefix ++ "Piping" :: Hash.toPath buildPath hash :: "through" :: cmd :: args))
-        (String.join " " (prefix ++ "Piped " :: Hash.toPath buildPath hash :: "through" :: cmd :: args))
+        (String.join " " (prefix ++ "Piping" :: Hash.toPath buildPath hash :: "through" :: Utils.viewEnv env :: cmd :: args))
+        (String.join " " (prefix ++ "Piped " :: Hash.toPath buildPath hash :: "through" :: Utils.viewEnv env :: cmd :: args))
         (Stream.fileRead (Hash.toPath buildPath hash)
             |> Stream.pipe (Stream.command cmd args)
             |> Stream.pipe (Stream.fileWrite (Hash.toPathTemporary buildPath target))
