@@ -11,6 +11,7 @@ import BackendTask.Http as Http
 import BackendTask.Stream as Stream
 import BuildTask exposing (BuildTask, DownloadError, FileOrDirectory)
 import BuildTask.Internal as Internal exposing (Error(..))
+import CommandOptions exposing (CommandOptions)
 import FatalError exposing (FatalError)
 import Hash
 import Pages.Script as Script
@@ -140,7 +141,7 @@ In particular, the command must not:
 -}
 commandInWritableDirectory : String -> List String -> FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error Int String } FileOrDirectory
 commandInWritableDirectory cmd args hash =
-    commandInWritableDirectoryWith Stream.defaultCommandOptions cmd args hash
+    commandInWritableDirectoryWith CommandOptions.default cmd args hash
 
 
 {-| Run a command in a writable temporary directory seeded from a cached directory.
@@ -163,9 +164,9 @@ In particular, the command must not:
   - use any other source of randomness.
 
 -}
-commandInWritableDirectoryWith : Stream.CommandOptions -> String -> List String -> FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error Int String } FileOrDirectory
+commandInWritableDirectoryWith : CommandOptions -> String -> List String -> FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error Int String } FileOrDirectory
 commandInWritableDirectoryWith options cmd args hash =
-    BuildTask.do (Internal.extendHashWith (cmd :: args) hash) <| \outputHash ->
+    BuildTask.do (Internal.extendHashWith ("commandInWritableDirectoryWith" :: CommandOptions.toStringList options ++ cmd :: args) hash) <| \outputHash ->
     Internal.derive (String.join " " ("commandInWritableDirectory" :: cmd :: args)) outputHash <| \{ prefix, buildPath } target ->
     let
         workspacePath : String
@@ -224,7 +225,7 @@ In particular, the command must not:
 -}
 commandInWritableDirectoryOutput : String -> List String -> FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error Int String } String
 commandInWritableDirectoryOutput cmd args hash =
-    commandInWritableDirectoryOutputWith Stream.defaultCommandOptions cmd args hash
+    commandInWritableDirectoryOutputWith CommandOptions.default cmd args hash
 
 
 {-| Run a command in a writable temporary directory seeded from a cached directory.
@@ -247,7 +248,7 @@ In particular, the command must not:
   - use any other source of randomness.
 
 -}
-commandInWritableDirectoryOutputWith : Stream.CommandOptions -> String -> List String -> FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error Int String } String
+commandInWritableDirectoryOutputWith : CommandOptions -> String -> List String -> FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error Int String } String
 commandInWritableDirectoryOutputWith options cmd args hash =
     BuildTask.do
         (commandInWritableDirectoryWith options cmd args hash)

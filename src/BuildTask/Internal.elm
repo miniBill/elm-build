@@ -8,6 +8,7 @@ import BackendTask.File as File
 import BackendTask.File.Extra
 import BackendTask.Http as Http
 import BackendTask.Stream as Stream
+import CommandOptions exposing (CommandOptions)
 import FastSet as Set exposing (Set)
 import FatalError exposing (FatalError)
 import Hash exposing (Hash, Normal, Temporary)
@@ -658,10 +659,10 @@ commandLog prefix cmd args =
 
 
 {-| -}
-commandLogWith : Stream.CommandOptions -> List String -> String -> List String -> BackendTask { fatal : FatalError, recoverable : Stream.Error Int String } String
+commandLogWith : CommandOptions -> List String -> String -> List String -> BackendTask { fatal : FatalError, recoverable : Stream.Error Int String } String
 commandLogWith options prefix cmd args =
     Stream.commandWithOptions
-        options
+        (CommandOptions.toStreamCommandOptions options)
         cmd
         args
         |> Stream.read
