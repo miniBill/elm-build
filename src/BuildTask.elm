@@ -1,15 +1,14 @@
 module BuildTask exposing
     ( BuildTask, Error(..)
-    , FileOrDirectory, input, inputs, downloadSHA256
-    , do, succeed, fail
+    , FileOrDirectory, input, inputs, downloadSHA256, DownloadError(..)
+    , do, doWithError, succeed, fail
     , writeFile, run
-    , map, map2, map3, map4, map5, andThen, andThen2, combine, combineBy, combineInto, each, sequence, toResult
+    , map, map2, map3, map4, map5, andThen, andThen2, combine, combineBy, combineInto, each, sequence, toResult, mapError, mapRecoverableError, allowFatal
     , withFile
     , withPrefix, timed
     , Warning, withWarning, withWarnings
     , jobs, triggerDebugger, fromResult
     , withEnv
-    , DownloadError(..), allowFatal, doWithError, mapError, mapRecoverableError
     )
 
 {-|
@@ -22,12 +21,12 @@ module BuildTask exposing
 
 ## Input
 
-@docs FileOrDirectory, input, inputs, downloadSHA256
+@docs FileOrDirectory, input, inputs, downloadSHA256, DownloadError
 
 
 ## Building blocks
 
-@docs Monad, do, succeed, fail
+@docs Monad, do, doWithError, succeed, fail
 
 
 ## Output
@@ -37,7 +36,7 @@ module BuildTask exposing
 
 ## Transforming and combining `Monad` values
 
-@docs map, map2, map3, map4, map5, andThen, andThen2, combine, combineBy, combineInto, each, sequence, toResult
+@docs map, map2, map3, map4, map5, andThen, andThen2, combine, combineBy, combineInto, each, sequence, toResult, mapError, mapRecoverableError, allowFatal
 
 
 ## Operations
