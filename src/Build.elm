@@ -38,6 +38,7 @@ type alias Config inputs =
     , jobs : Maybe Int
     , debug : Bool
     , check : Bool
+    , keepFailed : Bool
     , hashKind : HashKind
     }
 
@@ -111,6 +112,10 @@ programConfig =
                         |> Option.withDescription "Re-run all commands to check for determinism"
                     )
                 |> OptionsParser.with
+                    (Option.flag "keep-failed"
+                        |> Option.withDescription "Keep intermediate folder of failed commands"
+                    )
+                |> OptionsParser.with
                     (Option.optionalKeywordArg "hash-kind"
                         |> Option.withDescription "Kind of hash to use. Choose fast for FNV1a, secure for sha256."
                         |> Option.withDefault "fast"
@@ -128,7 +133,15 @@ toTask config =
         Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Processing inputs") <| \_ ->
         Do.do (Script.makeDirectory { recursive = True } (Path.toString config.buildDirectory)) <| \_ ->
         Do.do
-            (BuildTask.run { jobs = config.jobs, debug = config.debug, check = config.check, hashKind = config.hashKind } config.buildDirectory (config.buildAction inputs)
+            (BuildTask.run
+                { jobs = config.jobs
+                , debug = config.debug
+                , check = config.check
+                , hashKind = config.hashKind
+                , keepFailed = config.keepFailed
+                }
+                config.buildDirectory
+                (config.buildAction inputs)
                 |> BackendTask.mapError buildErrorToFatalError
             )
         <| \combined ->

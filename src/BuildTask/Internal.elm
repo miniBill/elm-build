@@ -46,6 +46,7 @@ type alias Input =
     , jobs : Int
     , debug : Bool
     , check : Bool
+    , keepFailed : Bool
     , hashKind : Hash.Kind
     }
 
@@ -352,7 +353,7 @@ withFile hash f =
         )
 
 
-run : { jobs : Maybe Int, debug : Bool, check : Bool, hashKind : Hash.Kind } -> Path -> BuildTask e (Hash Normal) -> BackendTask (Error e) { output : Path, intermediate : List Path, warnings : Set String }
+run : { jobs : Maybe Int, debug : Bool, check : Bool, hashKind : Hash.Kind, keepFailed : Bool } -> Path -> BuildTask e (Hash Normal) -> BackendTask (Error e) { output : Path, intermediate : List Path, warnings : Set String }
 run config buildPath m =
     Do.do (listExisting buildPath |> BackendTask.mapError InternalError) <| \existing ->
     Do.do
@@ -374,6 +375,7 @@ run config buildPath m =
             , debug = config.debug
             , hashKind = config.hashKind
             , check = config.check
+            , keepFailed = config.keepFailed
             }
     in
     runMonad m input_ { deps = HashSet.empty, warnings = Set.empty }

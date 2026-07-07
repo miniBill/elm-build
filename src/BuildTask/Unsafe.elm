@@ -167,7 +167,7 @@ In particular, the command must not:
 commandInWritableDirectoryWith : CommandOptions -> String -> List String -> FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error Int String } FileOrDirectory
 commandInWritableDirectoryWith options cmd args hash =
     BuildTask.do (Internal.extendHashWith ("commandInWritableDirectoryWith" :: CommandOptions.toStringList options ++ cmd :: args) hash) <| \outputHash ->
-    Internal.derive (String.join " " ("commandInWritableDirectory" :: cmd :: args)) outputHash <| \{ prefix, buildPath } target ->
+    Internal.derive (String.join " " ("commandInWritableDirectory" :: cmd :: args)) outputHash <| \{ prefix, buildPath, keepFailed } target ->
     let
         workspacePath : String
         workspacePath =
@@ -193,11 +193,20 @@ commandInWritableDirectoryWith options cmd args hash =
             |> BackendTask.inDir workspacePath
             |> BackendTask.mapError Internal.UserError
             |> BackendTask.Extra.finally
-                (BackendTask.File.Extra.removeFileIfExists workspacePath
-                    |> BackendTask.mapError Internal.InternalError
+                (if keepFailed then
+                    BackendTask.succeed ()
+
+                 else
+                    BackendTask.File.Extra.removeFileIfExists workspacePath
+                        |> BackendTask.mapError Internal.InternalError
                 )
         )
     <| \output ->
+    Do.do
+        (BackendTask.File.Extra.removeFileIfExists workspacePath
+            |> BackendTask.mapError Internal.InternalError
+        )
+    <| \() ->
     Script.writeFile { path = Hash.toPathTemporary buildPath target, body = output }
         |> BackendTask.allowFatal
         |> BackendTask.mapError Internal.InternalError
@@ -327,7 +336,7 @@ patchFileInDirectory :
 patchFileInDirectory hash filename { description } patch =
     BuildTask.do (Internal.extendHashWith [ "Patch", filename, description ] hash) <| \outputHash ->
     -- BuildTask.do (BuildTask.fail (FatalError.fromString "MEEP") |> Internal.fatalToInternal) <| \_ ->
-    Internal.derive ("Patch " ++ filename ++ " with " ++ description) outputHash <| \{ prefix, buildPath } target ->
+    Internal.derive ("Patch " ++ filename ++ " with " ++ description) outputHash <| \{ keepFailed, prefix, buildPath } target ->
     let
         workspacePath : String
         workspacePath =
@@ -358,12 +367,24 @@ patchFileInDirectory hash filename { description } patch =
                     }
                     |> BackendTask.allowFatal
                     |> BackendTask.mapError Internal.InternalError
+                    |> BackendTask.Extra.finally
+                        (if keepFailed then
+                            BackendTask.succeed ()
+
+                         else
+                            BackendTask.File.Extra.removeFileIfExists workspacePath
+                                |> BackendTask.mapError Internal.InternalError
+                        )
             )
         |> BackendTask.and
             (Internal.execLog prefix "cp" [ "-rl", workspacePath, Hash.toPathTemporary buildPath target ]
                 |> BackendTask.mapError Internal.InternalError
             )
-        |> BackendTask.Extra.finally
-            (BackendTask.File.Extra.removeFileIfExists workspacePath
-                |> BackendTask.mapError Internal.InternalError
+        |> BackendTask.and
+            (if keepFailed then
+                BackendTask.File.Extra.removeFileIfExists workspacePath
+                    |> BackendTask.mapError Internal.InternalError
+
+             else
+                BackendTask.succeed ()
             )

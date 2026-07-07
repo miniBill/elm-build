@@ -404,7 +404,12 @@ writeFile content =
 
 {-| -}
 run :
-    { jobs : Maybe Int, debug : Bool, check : Bool, hashKind : Hash.Kind }
+    { jobs : Maybe Int
+    , debug : Bool
+    , check : Bool
+    , hashKind : Hash.Kind
+    , keepFailed : Bool
+    }
     -> Path
     -> BuildTask e FileOrDirectory
     -> BackendTask (Error e) { output : Path, intermediate : List Path, warnings : Set Warning }
