@@ -1,11 +1,11 @@
-module BuildTask.Unsafe exposing (commandInReadonlyDirectory, commandInWritableDirectory, commandInWritableDirectoryOutput, commandInWritableDirectoryOutputWith, commandWithFile, downloadImmutable, named, pipeThrough)
+module BuildTask.Unsafe exposing (commandInReadonlyDirectory, commandInWritableDirectory, commandInWritableDirectoryOutput, commandInWritableDirectoryOutputWith, commandWithFile, downloadImmutable, named, patchFileInDirectory, pipeThrough)
 
 {-| -}
 
 import BackendTask
 import BackendTask.Do as Do
 import BackendTask.Extra
-import BackendTask.File
+import BackendTask.File as File
 import BackendTask.File.Extra
 import BackendTask.Http as Http
 import BackendTask.Stream as Stream
@@ -14,6 +14,7 @@ import BuildTask.Internal as Internal exposing (Error(..))
 import FatalError exposing (FatalError)
 import Hash
 import Pages.Script as Script
+import Path
 
 
 {-| Defines a named step. This function is useful to define steps where a computation is expensive,
@@ -308,3 +309,60 @@ downloadImmutable url =
         |> Stream.pipe (Stream.fileWrite (Hash.toPathTemporary buildPath target))
         |> Stream.readMetadata
         |> BackendTask.mapError (\e -> Internal.UserError e)
+
+
+{-| Patch a file.
+
+**CORRECTNESS:**
+If you change the function you must also change the description
+
+-}
+patchFileInDirectory :
+    FileOrDirectory
+    -> String
+    -> { description : String }
+    -> (String -> String)
+    -> BuildTask { fatal : FatalError, recoverable : File.FileReadError e } FileOrDirectory
+patchFileInDirectory hash filename { description } patch =
+    BuildTask.do (Internal.extendHashWith [ "Patch", filename, description ] hash) <| \outputHash ->
+    -- BuildTask.do (BuildTask.fail (FatalError.fromString "MEEP") |> Internal.fatalToInternal) <| \_ ->
+    Internal.derive ("Patch " ++ filename ++ " with " ++ description) outputHash <| \{ prefix, buildPath } target ->
+    let
+        workspacePath : String
+        workspacePath =
+            Hash.toPathWorkspace buildPath (Hash.toWorkspace target)
+    in
+    Do.do
+        (BackendTask.File.Extra.removeFileIfExists workspacePath
+            |> BackendTask.mapError Internal.InternalError
+        )
+    <| \_ ->
+    Do.do
+        (Script.exec "cp" [ "-r", Hash.toPath buildPath hash, workspacePath ]
+            |> BackendTask.mapError Internal.InternalError
+        )
+    <| \_ ->
+    Do.do
+        (Script.exec "chmod" [ "-R", "u+w", workspacePath ]
+            |> BackendTask.mapError Internal.InternalError
+        )
+    <| \_ ->
+    File.rawFile (workspacePath ++ "/" ++ filename)
+        |> BackendTask.mapError Internal.UserError
+        |> BackendTask.andThen
+            (\raw ->
+                Script.writeFile
+                    { path = workspacePath ++ "/" ++ filename
+                    , body = patch raw
+                    }
+                    |> BackendTask.allowFatal
+                    |> BackendTask.mapError Internal.InternalError
+            )
+        |> BackendTask.and
+            (Internal.execLog prefix "cp" [ "-rl", workspacePath, Hash.toPathTemporary buildPath target ]
+                |> BackendTask.mapError Internal.InternalError
+            )
+        |> BackendTask.Extra.finally
+            (BackendTask.File.Extra.removeFileIfExists workspacePath
+                |> BackendTask.mapError Internal.InternalError
+            )
