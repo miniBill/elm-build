@@ -1,24 +1,26 @@
 module BuildTask.Tar exposing (extract, listContents)
 
+import BackendTask
 import BackendTask.Do
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import BuildTask.Internal as Internal
 import BuildTask.Unsafe
+import FatalError exposing (FatalError)
 import Hash
 import Pages.Script as Script
 
 
 {-| List the contents of a tar file
 -}
-listContents : FileOrDirectory -> BuildTask (List String)
+listContents : FileOrDirectory -> BuildTask FatalError (List String)
 listContents tar =
-    BuildTask.do (BuildTask.Unsafe.pipeThrough "tar" [ "tf", "-" ] tar) <| \contentsFile ->
-    BuildTask.withFile contentsFile (\raw -> BuildTask.succeed (String.split "\n" raw))
+    BuildTask.do (BuildTask.Unsafe.pipeThrough "tar" [ "tf", "-" ] tar |> BuildTask.allowFatal) <| \contentsFile ->
+    BuildTask.withFile contentsFile (\raw -> BuildTask.succeed (String.split "\n" raw)) |> BuildTask.allowFatal
 
 
 {-| Extract files, optionally stripping a prefix. You don't need to specify the prefix in the list of files to extract.
 -}
-extract : { stripPrefix : Maybe String } -> FileOrDirectory -> List String -> BuildTask FileOrDirectory
+extract : { stripPrefix : Maybe String } -> FileOrDirectory -> List String -> BuildTask FatalError FileOrDirectory
 extract { stripPrefix } input files =
     let
         ( outputHashTask, filesArgs ) =
@@ -33,7 +35,11 @@ extract { stripPrefix } input files =
     in
     BuildTask.do outputHashTask <| \outputHash ->
     Internal.derive "tar xf" outputHash <| \{ prefix, buildPath } target ->
-    BackendTask.Do.do (Script.makeDirectory { recursive = True } (Hash.toPathTemporary buildPath target)) <| \() ->
+    BackendTask.Do.do
+        (Script.makeDirectory { recursive = True } (Hash.toPathTemporary buildPath target)
+            |> BackendTask.mapError Internal.InternalError
+        )
+    <| \() ->
     Internal.execLog prefix
         "tar"
         ([ "xf"
@@ -43,3 +49,4 @@ extract { stripPrefix } input files =
          ]
             ++ filesArgs
         )
+        |> BackendTask.mapError Internal.UserError

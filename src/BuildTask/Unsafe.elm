@@ -98,14 +98,18 @@ In particular, the command must not:
   - use any other source of randomness.
 
 -}
-commandInReadonlyDirectory : String -> List String -> FileOrDirectory -> BuildTask (Stream.Error Int String) FileOrDirectory
+commandInReadonlyDirectory :
+    String
+    -> List String
+    -> FileOrDirectory
+    -> BuildTask { fatal : FatalError, recoverable : Stream.Error Int String } FileOrDirectory
 commandInReadonlyDirectory cmd args hash =
     BuildTask.do (Internal.extendHashWith (cmd :: args) hash) <| \outputHash ->
     Internal.derive (String.join " " ("commandInReadonlyDirectory" :: cmd :: args)) outputHash <| \{ prefix, buildPath } target ->
     Do.do
         (Internal.commandLog prefix cmd args
             |> BackendTask.inDir (Hash.toPath buildPath hash)
-            |> BackendTask.mapError (\{ recoverable } -> Internal.UserError recoverable)
+            |> BackendTask.mapError Internal.UserError
         )
     <| \output ->
     Script.writeFile { path = Hash.toPathTemporary buildPath target, body = output }
@@ -192,24 +196,14 @@ In particular, the command must not:
   - use any other source of randomness.
 
 -}
-commandInWritableDirectoryOutput : String -> List String -> FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error (Result Int (BackendTask.File.FileReadError Never)) String } String
+commandInWritableDirectoryOutput : String -> List String -> FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error Int String } String
 commandInWritableDirectoryOutput cmd args hash =
     BuildTask.do
-        (commandInWritableDirectory cmd args hash
-            |> BuildTask.mapRecoverableError
-                (\recoverable ->
-                    case recoverable of
-                        Stream.StreamError e ->
-                            Stream.StreamError e
-
-                        Stream.CustomError e b ->
-                            Stream.CustomError (Err e) b
-                )
-        )
+        (commandInWritableDirectory cmd args hash)
     <| \target ->
     BuildTask.withFile target BuildTask.succeed
-        |> BuildTask.mapRecoverableError
-            (\recoverable -> Stream.CustomError (Ok recoverable) Nothing)
+        |> BuildTask.allowFatal
+        |> Internal.fatalToInternal
 
 
 {-| Run a command passing in a file (or directory) as last argument and save the result to a file.
@@ -249,7 +243,7 @@ commandWithFile cmd args hash =
 The file must never change on the server.
 
 -}
-downloadImmutable : String -> BuildTask DownloadError FileOrDirectory
+downloadImmutable : String -> BuildTask { recoverable : Stream.Error () String, fatal : FatalError } FileOrDirectory
 downloadImmutable url =
     BuildTask.do (Internal.hashFromString url) <| \outputHash ->
     Internal.derive ("downloadImmutable " ++ url) outputHash <| \{ buildPath } target ->
@@ -262,5 +256,5 @@ downloadImmutable url =
         , timeoutInMs = Nothing
         }
         |> Stream.pipe (Stream.fileWrite (Hash.toPathTemporary buildPath target))
-        |> Stream.run
-        |> BackendTask.mapError (\e -> Internal.UserError (BuildTask.DownloadError e))
+        |> Stream.readMetadata
+        |> BackendTask.mapError (\e -> Internal.UserError e)

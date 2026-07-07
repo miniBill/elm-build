@@ -1,4 +1,4 @@
-module BuildTask.Internal exposing (BuildTask(..), DownloadError(..), Error(..), Input, State, Warning, allowFatal, andThen, andThen2, combineBy, commandLog, derive, downloadSHA256, execLog, extendHashWith, fail, hashFromString, input, jobs, map, map2, map3, map4, map5, mapError, named, run, sequence, succeed, timed, toResult, triggerDebugger, withEnv, withFile, withPrefix, withWarning)
+module BuildTask.Internal exposing (BuildTask(..), DownloadError(..), Error(..), Input, State, Warning, allowFatal, andThen, andThen2, combineBy, commandLog, derive, downloadSHA256, execLog, extendHashWith, fail, fatalToInternal, hashFromString, input, jobs, map, map2, map3, map4, map5, mapError, named, run, sequence, succeed, timed, toResult, triggerDebugger, withEnv, withFile, withPrefix, withWarning)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Customs
@@ -800,5 +800,22 @@ allowFatal (BuildTask name t) =
 
                             UserError { fatal } ->
                                 UserError fatal
+                    )
+        )
+
+
+fatalToInternal : BuildTask FatalError a -> BuildTask e a
+fatalToInternal (BuildTask name t) =
+    BuildTask name
+        (\input_ state ->
+            t input_ state
+                |> BackendTask.mapError
+                    (\err ->
+                        case err of
+                            UserError u ->
+                                InternalError u
+
+                            InternalError i ->
+                                InternalError i
                     )
         )

@@ -61,7 +61,7 @@ The file must never change on the server.
 -}
 downloadImmutable :
     String
-    -> (FileOrDirectory -> BuildTask BuildTask.DownloadError a)
-    -> BuildTask BuildTask.DownloadError a
+    -> (FileOrDirectory -> BuildTask { recoverable : Stream.Error () String, fatal : FatalError } a)
+    -> BuildTask { recoverable : Stream.Error () String, fatal : FatalError } a
 downloadImmutable url k =
     BuildTask.Unsafe.downloadImmutable url |> andThen k
