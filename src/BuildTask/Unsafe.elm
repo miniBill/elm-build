@@ -1,4 +1,4 @@
-module BuildTask.Unsafe exposing (commandInReadonlyDirectory, commandInWritableDirectory, commandInWritableDirectoryOutput, commandWithFile, downloadImmutable, named, pipeThrough)
+module BuildTask.Unsafe exposing (commandInReadonlyDirectory, commandInWritableDirectory, commandInWritableDirectoryOutput, commandInWritableDirectoryOutputWith, commandWithFile, downloadImmutable, named, pipeThrough)
 
 {-| -}
 
@@ -139,6 +139,31 @@ In particular, the command must not:
 -}
 commandInWritableDirectory : String -> List String -> FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error Int String } FileOrDirectory
 commandInWritableDirectory cmd args hash =
+    commandInWritableDirectoryWith Stream.defaultCommandOptions cmd args hash
+
+
+{-| Run a command in a writable temporary directory seeded from a cached directory.
+
+This is similar to `commandInWritableDirectoryOutput` but returns a `FileOrDirectory` containing the output instead of the output.
+
+Unlike `commandInReadonlyDirectory` (which runs in the read-only cached directory directly),
+this creates a writable copy so the command can create temporary files
+(like `elm-stuff/` during compilation). Only stdout is captured and cached;
+the temporary directory is discarded after the command completes.
+
+**CORRECTNESS:**
+The command must be deterministic. The same input should correspond to the same output.
+
+In particular, the command must not:
+
+  - get data from the internet,
+  - read other files,
+  - use the current time,
+  - use any other source of randomness.
+
+-}
+commandInWritableDirectoryWith : Stream.CommandOptions -> String -> List String -> FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error Int String } FileOrDirectory
+commandInWritableDirectoryWith options cmd args hash =
     BuildTask.do (Internal.extendHashWith (cmd :: args) hash) <| \outputHash ->
     Internal.derive (String.join " " ("commandInWritableDirectory" :: cmd :: args)) outputHash <| \{ prefix, buildPath } target ->
     let
@@ -162,7 +187,7 @@ commandInWritableDirectory cmd args hash =
         )
     <| \_ ->
     Do.do
-        (Internal.commandLog prefix cmd args
+        (Internal.commandLogWith options prefix cmd args
             |> BackendTask.inDir workspacePath
             |> BackendTask.mapError Internal.UserError
             |> BackendTask.Extra.finally
@@ -198,8 +223,33 @@ In particular, the command must not:
 -}
 commandInWritableDirectoryOutput : String -> List String -> FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error Int String } String
 commandInWritableDirectoryOutput cmd args hash =
+    commandInWritableDirectoryOutputWith Stream.defaultCommandOptions cmd args hash
+
+
+{-| Run a command in a writable temporary directory seeded from a cached directory.
+
+This is similar to `commandInWritableDirectory` but returns the output instead of a `FileOrDirectory` containing the output.
+
+Unlike `commandInReadonlyDirectory` (which runs in the read-only cached directory directly),
+this creates a writable copy so the command can create temporary files
+(like `elm-stuff/` during compilation). Only stdout is captured and cached;
+the temporary directory is discarded after the command completes.
+
+**CORRECTNESS:**
+The command must be deterministic. The same input should correspond to the same output.
+
+In particular, the command must not:
+
+  - get data from the internet,
+  - read other files,
+  - use the current time,
+  - use any other source of randomness.
+
+-}
+commandInWritableDirectoryOutputWith : Stream.CommandOptions -> String -> List String -> FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error Int String } String
+commandInWritableDirectoryOutputWith options cmd args hash =
     BuildTask.do
-        (commandInWritableDirectory cmd args hash)
+        (commandInWritableDirectoryWith options cmd args hash)
     <| \target ->
     BuildTask.withFile target BuildTask.succeed
         |> BuildTask.allowFatal

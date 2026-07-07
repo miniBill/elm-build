@@ -1,4 +1,4 @@
-module BuildTask.Internal exposing (BuildTask(..), DownloadError(..), Error(..), Input, State, Warning, allowFatal, andThen, andThen2, combineBy, commandLog, derive, downloadSHA256, execLog, extendHashWith, fail, fatalToInternal, hashFromString, input, jobs, map, map2, map3, map4, map5, mapError, named, run, sequence, succeed, timed, toResult, triggerDebugger, withEnv, withFile, withPrefix, withWarning)
+module BuildTask.Internal exposing (BuildTask(..), DownloadError(..), Error(..), Input, State, Warning, allowFatal, andThen, andThen2, combineBy, commandLog, commandLogWith, derive, downloadSHA256, execLog, extendHashWith, fail, fatalToInternal, hashFromString, input, jobs, map, map2, map3, map4, map5, mapError, named, run, sequence, succeed, timed, toResult, triggerDebugger, withEnv, withFile, withPrefix, withWarning)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Customs
@@ -649,16 +649,24 @@ downloadSHA256 { url, sha256 } =
 {-| -}
 commandLog : List String -> String -> List String -> BackendTask { fatal : FatalError, recoverable : Stream.Error Int String } String
 commandLog prefix cmd args =
-    logCommand prefix
+    Stream.command
         cmd
         args
-        (Stream.commandWithOptions
-            (Stream.defaultCommandOptions |> Stream.withOutput Stream.PrintStderr)
-            cmd
-            args
-            |> Stream.read
-            |> BackendTask.map .body
-        )
+        |> Stream.read
+        |> BackendTask.map .body
+        |> logCommand prefix cmd args
+
+
+{-| -}
+commandLogWith : Stream.CommandOptions -> List String -> String -> List String -> BackendTask { fatal : FatalError, recoverable : Stream.Error Int String } String
+commandLogWith options prefix cmd args =
+    Stream.commandWithOptions
+        options
+        cmd
+        args
+        |> Stream.read
+        |> BackendTask.map .body
+        |> logCommand prefix cmd args
 
 
 {-| -}
