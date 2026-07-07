@@ -34,13 +34,13 @@ extract { stripPrefix } input files =
                     )
     in
     BuildTask.do outputHashTask <| \outputHash ->
-    Internal.derive "tar xf" outputHash <| \{ prefix, buildPath } target ->
+    Internal.derive "tar xf" outputHash <| \{ prefix, env, buildPath } target ->
     BackendTask.Do.do
         (Script.makeDirectory { recursive = True } (Hash.toPathTemporary buildPath target)
             |> BackendTask.mapError Internal.InternalError
         )
     <| \() ->
-    Internal.execLog prefix
+    Internal.execLog prefix env 
         "tar"
         ([ "xf"
          , Hash.toPath buildPath input
