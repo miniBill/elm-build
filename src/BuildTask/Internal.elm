@@ -393,7 +393,16 @@ listExisting path =
     BackendTask.Customs.readdir path
         |> BackendTask.andThen
             (\list ->
-                case HashSet.fromList (List.Extra.removeWhen (String.startsWith "tmp-") list) of
+                case
+                    HashSet.fromList
+                        (List.Extra.removeWhen
+                            (\s ->
+                                String.startsWith "tmp-" s
+                                    || String.startsWith "workspace-" s
+                            )
+                            list
+                        )
+                of
                     Ok o ->
                         BackendTask.succeed o
 
