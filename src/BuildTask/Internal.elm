@@ -683,9 +683,21 @@ commandLogWith options prefix env cmd args =
 {-| -}
 logCommand : List String -> Dict String String -> String -> List String -> BackendTask error a -> BackendTask error a
 logCommand prefix env cmd args task =
+    let
+        label : String -> String
+        label i =
+            (prefix
+                ++ String.padLeft 7 ' ' i
+                :: Utils.viewEnv env
+                :: cmd
+                :: args
+            )
+                |> List.Extra.removeWhen String.isEmpty
+                |> String.join " "
+    in
     BackendTask.Extra.timed
-        (String.join " " (prefix ++ "Running" :: Utils.viewEnv env :: cmd :: args))
-        (String.join " " (prefix ++ "Ran    " :: Utils.viewEnv env :: cmd :: args))
+        (label "Running")
+        (label "Ran")
         task
 
 

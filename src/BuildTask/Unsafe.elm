@@ -14,6 +14,7 @@ import BuildTask.Internal as Internal exposing (Error(..))
 import CommandOptions exposing (CommandOptions)
 import FatalError exposing (FatalError)
 import Hash
+import List.Extra
 import Pages.Script as Script
 import Path
 import Utils
@@ -75,9 +76,23 @@ pipeThrough :
 pipeThrough cmd args hash =
     BuildTask.do (Internal.extendHashWith (cmd :: args) hash) <| \outputHash ->
     Internal.derive (String.join " " ("pipeThrough" :: cmd :: args)) outputHash <| \{ prefix, buildPath, env } target ->
+    let
+        label : String -> String
+        label i =
+            (prefix
+                ++ String.padLeft 6 ' ' i
+                :: Hash.toPath buildPath hash
+                :: "through"
+                :: Utils.viewEnv env
+                :: cmd
+                :: args
+            )
+                |> List.Extra.removeWhen String.isEmpty
+                |> String.join " "
+    in
     BackendTask.Extra.timed
-        (String.join " " (prefix ++ "Piping" :: Hash.toPath buildPath hash :: "through" :: Utils.viewEnv env :: cmd :: args))
-        (String.join " " (prefix ++ "Piped " :: Hash.toPath buildPath hash :: "through" :: Utils.viewEnv env :: cmd :: args))
+        (label "Piping")
+        (label "Piped")
         (Stream.fileRead (Hash.toPath buildPath hash)
             |> Stream.pipe (Stream.command cmd args)
             |> Stream.pipe (Stream.fileWrite (Hash.toPathTemporary buildPath target))
