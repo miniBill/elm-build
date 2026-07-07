@@ -4,7 +4,7 @@ module BuildTask exposing
     , do, doWithError, succeed, fail
     , writeFile, run
     , map, map2, map3, map4, map5, andThen, andThen2, combine, combineBy, combineInto, each, sequence, toResult, mapError, mapRecoverableError, allowFatal
-    , withFile
+    , withFile, readFromDirectory
     , withPrefix, timed
     , Warning, withWarning, withWarnings
     , jobs, triggerDebugger, fromResult
@@ -41,7 +41,7 @@ module BuildTask exposing
 
 ## Operations
 
-@docs commandWithFile, commandInReadonlyDirectory, commandInWritableDirectory, withFile
+@docs commandWithFile, commandInReadonlyDirectory, commandInWritableDirectory, withFile, readFromDirectory
 
 
 ## Output control
@@ -506,3 +506,9 @@ mapRecoverableError f task =
 allowFatal : BuildTask { e | fatal : FatalError } a -> BuildTask FatalError a
 allowFatal task =
     Internal.allowFatal task
+
+
+readFromDirectory : FileOrDirectory -> String -> BuildTask { fatal : FatalError, recoverable : File.FileReadError e } String
+readFromDirectory directory file =
+    do (Internal.extractFromDirectory directory file) <| \extracted ->
+    withFile extracted succeed

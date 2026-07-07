@@ -1,4 +1,4 @@
-module BuildTask.Internal exposing (BuildTask(..), DownloadError(..), Error(..), Input, State, Warning, allowFatal, andThen, andThen2, combineBy, commandLog, commandLogWith, derive, downloadSHA256, execLog, extendHashWith, fail, fatalToInternal, hashFromString, input, jobs, map, map2, map3, map4, map5, mapError, named, run, sequence, succeed, timed, toResult, triggerDebugger, withEnv, withFile, withPrefix, withWarning)
+module BuildTask.Internal exposing (BuildTask(..), DownloadError(..), Error(..), Input, State, Warning, allowFatal, andThen, andThen2, combineBy, commandLog, commandLogWith, derive, downloadSHA256, execLog, extendHashWith, extractFromDirectory, fail, fatalToInternal, hashFromString, input, jobs, map, map2, map3, map4, map5, mapError, named, run, sequence, succeed, timed, toResult, triggerDebugger, withEnv, withFile, withPrefix, withWarning)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Customs
@@ -836,3 +836,23 @@ fatalToInternal (BuildTask name t) =
                                 InternalError i
                     )
         )
+
+
+extractFromDirectory : Hash Normal -> String -> BuildTask { fatal : FatalError, recoverable : File.FileReadError e } (Hash Normal)
+extractFromDirectory directory file =
+    extendHashWith [ "extract", file ] directory
+        |> andThen
+            (\outputHash ->
+                derive ("extract " ++ file) outputHash <| \{ buildPath } target ->
+                Script.copyFile
+                    { from = Hash.toPath buildPath directory ++ "/" ++ file
+                    , to = Hash.toPathTemporary buildPath target
+                    }
+                    |> BackendTask.mapError
+                        (\fatal ->
+                            UserError
+                                { fatal = fatal
+                                , recoverable = File.FileDoesntExist
+                                }
+                        )
+            )
