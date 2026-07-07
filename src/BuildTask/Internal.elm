@@ -577,9 +577,9 @@ triggerDebugger =
 input : Path -> BuildTask FatalError (Hash Normal)
 input inputPath =
     build "input"
-        (\{ prefix } deps ->
+        (\{ prefix, env } deps ->
             Do.do
-                (commandLog prefix "b3sum" [ Path.toString inputPath ]
+                (commandLog prefix env "b3sum" [ Path.toString inputPath ]
                     |> BackendTask.allowFatal
                     |> BackendTask.mapError UserError
                 )
@@ -622,7 +622,7 @@ downloadSHA256 { url, sha256 } =
                 fail (InvalidHashHex sha256)
 
             Ok hex ->
-                derive "downloadSHA256" (Hash.build hex) <| \{ prefix, buildPath } target ->
+                derive "downloadSHA256" (Hash.build hex) <| \{ prefix, buildPath, env } target ->
                 let
                     tmpPath : String
                     tmpPath =
@@ -643,7 +643,7 @@ downloadSHA256 { url, sha256 } =
                     )
                 <| \_ ->
                 Do.do
-                    (commandLog prefix "sha256sum" [ tmpPath ]
+                    (commandLog prefix env "sha256sum" [ tmpPath ]
                         |> BackendTask.allowFatal
                         |> BackendTask.mapError InternalError
                     )
@@ -663,36 +663,36 @@ downloadSHA256 { url, sha256 } =
 
 
 {-| -}
-commandLog : List String -> String -> List String -> BackendTask { fatal : FatalError, recoverable : Stream.Error Int String } String
-commandLog prefix cmd args =
-    commandLogWith CommandOptions.default prefix cmd args
+commandLog : List String -> Dict String String -> String -> List String -> BackendTask { fatal : FatalError, recoverable : Stream.Error Int String } String
+commandLog prefix env cmd args =
+    commandLogWith CommandOptions.default prefix env cmd args
 
 
 {-| -}
-commandLogWith : CommandOptions -> List String -> String -> List String -> BackendTask { fatal : FatalError, recoverable : Stream.Error Int String } String
-commandLogWith options prefix cmd args =
+commandLogWith : CommandOptions -> List String -> Dict String String -> String -> List String -> BackendTask { fatal : FatalError, recoverable : Stream.Error Int String } String
+commandLogWith options prefix env cmd args =
     Stream.commandWithOptions
         (CommandOptions.toStreamCommandOptions options)
         cmd
         args
         |> Stream.read
         |> BackendTask.map .body
-        |> logCommand prefix cmd args
+        |> logCommand prefix env cmd args
 
 
 {-| -}
-logCommand : List String -> String -> List String -> BackendTask error a -> BackendTask error a
-logCommand prefix cmd args task =
+logCommand : List String -> Dict String String -> String -> List String -> BackendTask error a -> BackendTask error a
+logCommand prefix env cmd args task =
     BackendTask.Extra.timed
-        (String.join " " (prefix ++ "Running" :: cmd :: args))
-        (String.join " " (prefix ++ "Ran    " :: cmd :: args))
+        (String.join " " (prefix ++ "Running" :: Utils.viewEnv env :: cmd :: args))
+        (String.join " " (prefix ++ "Ran    " :: Utils.viewEnv env :: cmd :: args))
         task
 
 
 {-| -}
-execLog : List String -> String -> List String -> BackendTask FatalError ()
-execLog prefix cmd args =
-    logCommand prefix cmd args (Script.exec cmd args)
+execLog : List String -> Dict String String -> String -> List String -> BackendTask FatalError ()
+execLog prefix env cmd args =
+    logCommand prefix env cmd args (Script.exec cmd args)
 
 
 named : String -> (a -> { files : List (Hash Normal), additionalData : List String }) -> (a -> BuildTask e (Hash Normal)) -> a -> BuildTask e (Hash Normal)

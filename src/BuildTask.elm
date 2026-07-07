@@ -238,7 +238,7 @@ inputs :
 inputs inputPaths =
     -- TODO: copy the files inside the build path _before_ hashing
     Do.do
-        (Internal.commandLog [] "b3sum" (List.map Path.toString inputPaths)
+        (Internal.commandLog [] Dict.empty "b3sum" (List.map Path.toString inputPaths)
             |> BackendTask.allowFatal
         )
     <| \body ->
@@ -357,14 +357,14 @@ combineTree (Tree tree) =
                 |> Internal.hashFromString
     in
     do outputHash <| \combinedHash ->
-    Internal.derive "combine" combinedHash <| \{ prefix, buildPath } target ->
+    Internal.derive "combine" combinedHash <| \{ prefix, buildPath, env } target ->
     Do.do
         (Script.makeDirectory { recursive = True } (Hash.toPathTemporary buildPath target)
             |> BackendTask.mapError Internal.InternalError
         )
     <| \_ ->
     combined
-        |> Dict.foldl (\outputFilename hash acc -> Internal.execLog prefix "cp" [ "-rl", Hash.toPath buildPath hash, Hash.toPathTemporary buildPath target ++ "/" ++ outputFilename ] :: acc) []
+        |> Dict.foldl (\outputFilename hash acc -> Internal.execLog prefix env "cp" [ "-rl", Hash.toPath buildPath hash, Hash.toPathTemporary buildPath target ++ "/" ++ outputFilename ] :: acc) []
         |> BackendTask.Extra.combineBy_ parallelism
         |> BackendTask.mapError Internal.InternalError
 
