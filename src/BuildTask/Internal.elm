@@ -542,7 +542,15 @@ succeed v =
 
 fail : msg -> BuildTask msg a
 fail msg =
-    triggerDebugger
+    build "checkIfDebug" (\{ debug } deps -> BackendTask.succeed ( debug, deps ))
+        |> andThen
+            (\debug ->
+                if debug then
+                    triggerDebugger
+
+                else
+                    succeed ()
+            )
         |> andThen
             (\_ ->
                 build "fail"
