@@ -8,7 +8,7 @@ module BuildTask exposing
     , withPrefix, timed
     , Warning, withWarning, withWarnings
     , jobs, triggerDebugger, fromResult
-    , withEnv
+    , withEnv, withMemoryLimitInGB
     )
 
 {-|
@@ -61,7 +61,7 @@ module BuildTask exposing
 
 ## Advanced
 
-@docs withEnv
+@docs withEnv, withMemoryLimitInGB
 
 -}
 
@@ -238,7 +238,13 @@ inputs :
 inputs inputPaths =
     -- TODO: copy the files inside the build path _before_ hashing
     Do.do
-        (Internal.commandLog [] Dict.empty "b3sum" (List.map Path.toString inputPaths)
+        (Internal.commandLog
+            { memoryLimit = Nothing
+            , prefix = []
+            , env = Dict.empty
+            }
+            "b3sum"
+            (List.map Path.toString inputPaths)
             |> BackendTask.allowFatal
         )
     <| \body ->
@@ -357,14 +363,14 @@ combineTree (Tree tree) =
                 |> Internal.hashFromString
     in
     do outputHash <| \combinedHash ->
-    Internal.derive "combine" combinedHash <| \{ prefix, buildPath, env } target ->
+    Internal.derive "combine" combinedHash <| \({ prefix, buildPath, env } as input_) target ->
     Do.do
         (Script.makeDirectory { recursive = True } (Hash.toPathTemporary buildPath target)
             |> BackendTask.mapError Internal.InternalError
         )
     <| \_ ->
     combined
-        |> Dict.foldl (\outputFilename hash acc -> Internal.execLog prefix env "cp" [ "-rl", Hash.toPath buildPath hash, Hash.toPathTemporary buildPath target ++ "/" ++ outputFilename ] :: acc) []
+        |> Dict.foldl (\outputFilename hash acc -> Internal.execLog input_ "cp" [ "-rl", Hash.toPath buildPath hash, Hash.toPathTemporary buildPath target ++ "/" ++ outputFilename ] :: acc) []
         |> BackendTask.Extra.combineBy_ parallelism
         |> BackendTask.mapError Internal.InternalError
 
@@ -517,3 +523,8 @@ readFromDirectory : FileOrDirectory -> String -> BuildTask { fatal : FatalError,
 readFromDirectory directory file =
     do (Internal.extractFromDirectory directory file) <| \extracted ->
     withFile extracted succeed
+
+
+withMemoryLimitInGB : Int -> BuildTask e a -> BuildTask e a
+withMemoryLimitInGB limit task =
+    Internal.withMemoryLimitInBytes (limit * 1024 * 1024 * 1024) task

@@ -1,4 +1,4 @@
-module BuildTask.Internal exposing (BuildTask(..), DownloadError(..), Error(..), Input, State, Warning, allowFatal, andThen, andThen2, combineBy, commandLog, commandLogWith, derive, downloadSHA256, execLog, extendHashWith, extractFromDirectory, fail, fatalToInternal, hashFromString, input, jobs, map, map2, map3, map4, map5, mapError, named, run, sequence, succeed, timed, toResult, triggerDebugger, withEnv, withFile, withPrefix, withWarning)
+module BuildTask.Internal exposing (BuildTask(..), DownloadError(..), Error(..), Input, State, Warning, allowFatal, andThen, andThen2, combineBy, commandLog, commandLogWith, derive, downloadSHA256, execLog, extendHashWith, extractFromDirectory, fail, fatalToInternal, hashFromString, input, jobs, map, map2, map3, map4, map5, mapError, named, run, sequence, succeed, timed, toResult, triggerDebugger, withEnv, withFile, withMemoryLimitInBytes, withPrefix, withWarning)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Customs
@@ -55,6 +55,7 @@ type alias Input =
     , keepFailed : Bool
     , hashKind : Hash.Kind
     , env : Dict String String
+    , memoryLimit : Maybe Int
     }
 
 
@@ -389,6 +390,7 @@ run config buildPath m =
             , check = config.check
             , keepFailed = config.keepFailed
             , env = Dict.empty
+            , memoryLimit = Nothing
             }
     in
     runMonad m input_ { deps = HashSet.empty, warnings = Set.empty }
@@ -577,9 +579,9 @@ triggerDebugger =
 input : Path -> BuildTask FatalError (Hash Normal)
 input inputPath =
     build "input"
-        (\{ prefix, env } deps ->
+        (\({ prefix, env } as input_) deps ->
             Do.do
-                (commandLog prefix env "b3sum" [ Path.toString inputPath ]
+                (commandLog input_ "b3sum" [ Path.toString inputPath ]
                     |> BackendTask.allowFatal
                     |> BackendTask.mapError UserError
                 )
@@ -622,7 +624,7 @@ downloadSHA256 { url, sha256 } =
                 fail (InvalidHashHex sha256)
 
             Ok hex ->
-                derive "downloadSHA256" (Hash.build hex) <| \{ prefix, buildPath, env } target ->
+                derive "downloadSHA256" (Hash.build hex) <| \({ prefix, buildPath, env } as input_) target ->
                 let
                     tmpPath : String
                     tmpPath =
@@ -643,7 +645,7 @@ downloadSHA256 { url, sha256 } =
                     )
                 <| \_ ->
                 Do.do
-                    (commandLog prefix env "sha256sum" [ tmpPath ]
+                    (commandLog input_ "sha256sum" [ tmpPath ]
                         |> BackendTask.allowFatal
                         |> BackendTask.mapError InternalError
                     )
@@ -663,26 +665,88 @@ downloadSHA256 { url, sha256 } =
 
 
 {-| -}
-commandLog : List String -> Dict String String -> String -> List String -> BackendTask { fatal : FatalError, recoverable : Stream.Error Int String } String
-commandLog prefix env cmd args =
-    commandLogWith CommandOptions.default prefix env cmd args
+commandLog : { a | memoryLimit : Maybe Int, prefix : List String, env : Dict String String } -> String -> List String -> BackendTask { fatal : FatalError, recoverable : Stream.Error Int String } String
+commandLog input_ cmd args =
+    commandLogWith input_ CommandOptions.default cmd args
 
 
 {-| -}
-commandLogWith : CommandOptions -> List String -> Dict String String -> String -> List String -> BackendTask { fatal : FatalError, recoverable : Stream.Error Int String } String
-commandLogWith options prefix env cmd args =
-    Stream.commandWithOptions
-        (CommandOptions.toStreamCommandOptions options)
-        cmd
-        args
+commandLogWith : { a | memoryLimit : Maybe Int, prefix : List String, env : Dict String String } -> CommandOptions -> String -> List String -> BackendTask { fatal : FatalError, recoverable : Stream.Error Int String } String
+commandLogWith input_ options cmd args =
+    wrapCommand input_ options cmd args
         |> Stream.read
         |> BackendTask.map .body
-        |> logCommand prefix env cmd args
+        |> logCommand input_ cmd args
 
 
 {-| -}
-logCommand : List String -> Dict String String -> String -> List String -> BackendTask error a -> BackendTask error a
-logCommand prefix env cmd args task =
+execLog : Input -> String -> List String -> BackendTask FatalError ()
+execLog input_ cmd args =
+    wrapCommand input_ CommandOptions.default cmd args
+        |> Stream.run
+        |> logCommand input_ cmd args
+
+
+wrapCommand :
+    { a | memoryLimit : Maybe Int }
+    -> CommandOptions
+    -> String
+    -> List String
+    -> Stream.Stream Int () { read : read, write : write }
+wrapCommand input_ options cmd args =
+    case input_.memoryLimit of
+        Nothing ->
+            Stream.commandWithOptions
+                (CommandOptions.toStreamCommandOptions options)
+                cmd
+                args
+
+        Just limit ->
+            let
+                kilo : Int
+                kilo =
+                    1024
+
+                mega : Int
+                mega =
+                    kilo * 1024
+
+                giga : Int
+                giga =
+                    mega * 1024
+
+                limitString : String
+                limitString =
+                    if modBy giga limit == 0 then
+                        String.fromInt (limit // giga) ++ "G"
+
+                    else if modBy mega limit == 0 then
+                        String.fromInt (limit // mega) ++ "M"
+
+                    else if modBy kilo limit == 0 then
+                        String.fromInt (limit // kilo) ++ "K"
+
+                    else
+                        String.fromInt limit
+            in
+            Stream.commandWithOptions
+                (CommandOptions.toStreamCommandOptions options)
+                "systemd-run"
+                ([ "--quiet"
+                 , "--scope"
+                 , "-p"
+                 , "MemoryMax=" ++ limitString
+                 , "--user"
+                 , "--"
+                 , cmd
+                 ]
+                    ++ args
+                )
+
+
+{-| -}
+logCommand : { a | prefix : List String, env : Dict String String } -> String -> List String -> BackendTask error b -> BackendTask error b
+logCommand { prefix, env } cmd args task =
     let
         label : String -> String
         label i =
@@ -699,12 +763,6 @@ logCommand prefix env cmd args task =
         (label "Running")
         (label "Ran")
         task
-
-
-{-| -}
-execLog : List String -> Dict String String -> String -> List String -> BackendTask FatalError ()
-execLog prefix env cmd args =
-    logCommand prefix env cmd args (Script.exec cmd args)
 
 
 named : String -> (a -> { files : List (Hash Normal), additionalData : List String }) -> (a -> BuildTask e (Hash Normal)) -> a -> BuildTask e (Hash Normal)
@@ -791,6 +849,14 @@ withEnv env (BuildTask name (Monad f)) =
     build name
         (\input_ state ->
             f { input_ | env = Dict.union (Dict.fromList env) input_.env } state
+        )
+
+
+withMemoryLimitInBytes : Int -> BuildTask e a -> BuildTask e a
+withMemoryLimitInBytes limit (BuildTask name (Monad f)) =
+    build name
+        (\input_ state ->
+            f { input_ | memoryLimit = Just limit } state
         )
 
 
