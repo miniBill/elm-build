@@ -276,34 +276,25 @@ equalsHelp lq rq =
 
 unionAll : List (BST comparable) -> BST comparable
 unionAll list =
-    let
-        array : Array (BST comparable)
-        array =
-            Array.fromList list
-    in
-    unionAllHelp 0 (Array.length array) array
+    unionAllHelp list []
 
 
-unionAllHelp : Int -> Int -> Array (BST comparable) -> BST comparable
-unionAllHelp from to arr =
-    if to < from then
-        empty
+unionAllHelp : List (BST comparable) -> List (BST comparable) -> BST comparable
+unionAllHelp queue acc =
+    case queue of
+        [] ->
+            case acc of
+                [] ->
+                    empty
 
-    else if to == from + 1 then
-        Array.get from arr |> Maybe.withDefault empty
+                [ x ] ->
+                    x
 
-    else
-        let
-            mid : Int
-            mid =
-                from + (to - from) // 2
+                _ ->
+                    unionAllHelp acc []
 
-            l : BST comparable
-            l =
-                unionAllHelp from mid arr
+        [ x ] ->
+            unionAllHelp [] (x :: acc)
 
-            r : BST comparable
-            r =
-                unionAllHelp mid to arr
-        in
-        union l r
+        first :: second :: rest ->
+            unionAllHelp rest (union first second :: acc)
