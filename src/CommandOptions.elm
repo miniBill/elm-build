@@ -1,6 +1,7 @@
-module CommandOptions exposing (CommandOptions, allowNon0Status, default, toStreamCommandOptions, toStringList, withOutput)
+module CommandOptions exposing (CommandOptions, allowNon0Status, default, toStreamCommandOptionsAndTimeout, toStringList, withOutput, withTimeout)
 
 import BackendTask.Stream as Stream
+import Duration exposing (Duration)
 import Maybe.Extra
 
 
@@ -8,16 +9,17 @@ default : CommandOptions
 default =
     { allowNon0Status = False
     , output = Nothing
+    , timeout = Nothing
     }
 
 
 type alias CommandOptions =
-    { allowNon0Status : Bool, output : Maybe Stream.StderrOutput }
+    { allowNon0Status : Bool, output : Maybe Stream.StderrOutput, timeout : Maybe Duration }
 
 
-toStreamCommandOptions : CommandOptions -> Stream.CommandOptions
-toStreamCommandOptions options =
-    Stream.defaultCommandOptions
+toStreamCommandOptionsAndTimeout : CommandOptions -> ( Stream.CommandOptions, Maybe Duration )
+toStreamCommandOptionsAndTimeout options =
+    ( Stream.defaultCommandOptions
         |> (if options.allowNon0Status then
                 Stream.allowNon0Status
 
@@ -31,6 +33,8 @@ toStreamCommandOptions options =
                 Nothing ->
                     identity
            )
+    , options.timeout
+    )
 
 
 {-| Convert the `CommandOptions` into a list of string for use in hashing tasks.
@@ -71,3 +75,8 @@ allowNon0Status options =
 withOutput : Stream.StderrOutput -> CommandOptions -> CommandOptions
 withOutput output options =
     { options | output = Just output }
+
+
+withTimeout : Duration -> CommandOptions -> CommandOptions
+withTimeout duration options =
+    { options | timeout = Just duration }

@@ -9,6 +9,7 @@ import BackendTask.File.Extra
 import BackendTask.Http as Http
 import BackendTask.Stream as Stream exposing (Stream)
 import CommandOptions exposing (CommandOptions)
+import Duration
 import FastDict as Dict exposing (Dict)
 import FastSet as Set exposing (Set)
 import FatalError exposing (FatalError)
@@ -762,12 +763,22 @@ wrapCommand input_ options cmd args =
 
             else
                 ""
+
+        ( streamOptions, timeout ) =
+            CommandOptions.toStreamCommandOptionsAndTimeout options
     in
     if String.isEmpty memoryArg && String.isEmpty cpuWeightArg then
-        Stream.commandWithOptions
-            (CommandOptions.toStreamCommandOptions options)
-            cmd
-            args
+        case timeout of
+            Nothing ->
+                Stream.commandWithOptions streamOptions cmd args
+
+            Just duration ->
+                Stream.commandWithOptions streamOptions
+                    "timeout"
+                    (String.fromFloat (Duration.inSeconds duration)
+                        :: cmd
+                        :: args
+                    )
 
     else
         ([ "--quiet"
@@ -786,13 +797,21 @@ wrapCommand input_ options cmd args =
                 else
                     [ "-p", cpuWeightArg ]
                )
-            ++ [ "--"
-               , cmd
-               ]
+            ++ (case timeout of
+                    Nothing ->
+                        [ "--", cmd ]
+
+                    Just duration ->
+                        [ "--"
+                        , "timeout"
+                        , String.fromFloat (Duration.inSeconds duration)
+                        , cmd
+                        ]
+               )
             ++ args
         )
             |> Stream.commandWithOptions
-                (CommandOptions.toStreamCommandOptions options)
+                streamOptions
                 "systemd-run"
 
 
