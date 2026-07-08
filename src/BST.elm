@@ -212,9 +212,9 @@ unique list =
             let
                 ( nh, nt, nl ) =
                     List.foldl
-                        (\e ( l, a, len ) ->
+                        (\e (( l, a, len ) as prev) ->
                             if e == l then
-                                ( l, a, len )
+                                prev
 
                             else
                                 ( e, l :: a, len + 1 )
