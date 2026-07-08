@@ -8,7 +8,7 @@ module BuildTask exposing
     , withPrefix, timed
     , Warning, withWarning, withWarnings
     , jobs, triggerDebugger, fromResult
-    , withEnv, withMemoryLimitInGB
+    , withEnv, withMemoryLimitInGB, withDebug
     )
 
 {-|
@@ -61,7 +61,7 @@ module BuildTask exposing
 
 ## Advanced
 
-@docs withEnv, withMemoryLimitInGB
+@docs withEnv, withMemoryLimitInGB, withDebug
 
 -}
 
@@ -528,3 +528,8 @@ readFromDirectory directory file =
 withMemoryLimitInGB : Int -> BuildTask e a -> BuildTask e a
 withMemoryLimitInGB limit task =
     Internal.withMemoryLimitInBytes (limit * 1024 * 1024 * 1024) task
+
+
+withDebug : (String -> Never) -> BuildTask e v -> BuildTask e v
+withDebug todo task =
+    Internal.withDebug todo task

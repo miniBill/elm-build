@@ -1,4 +1,4 @@
-module BuildTask.Internal exposing (BuildTask(..), DownloadError(..), Error(..), Input, Monad, State, Warning, allowFatal, andThen, andThen2, combineBy, commandLog, commandLogWith, derive, downloadSHA256, execLog, extendHashWith, extractFromDirectory, fail, fatalToInternal, hashFromString, input, jobs, map, map2, map3, map4, map5, mapError, named, run, sequence, succeed, timed, toResult, triggerDebugger, withEnv, withFile, withMemoryLimitInBytes, withPrefix, withWarning)
+module BuildTask.Internal exposing (BuildTask(..), DownloadError(..), Error(..), Input, Monad, State, Warning, allowFatal, andThen, andThen2, combineBy, commandLog, commandLogWith, derive, downloadSHA256, execLog, extendHashWith, extractFromDirectory, fail, fatalToInternal, hashFromString, input, jobs, map, map2, map3, map4, map5, mapError, named, run, sequence, succeed, timed, toResult, triggerDebugger, withDebug, withEnv, withFile, withMemoryLimitInBytes, withPrefix, withWarning)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Customs
@@ -117,7 +117,7 @@ derive description target inner =
                         Hash.toPath buildPath target
                 in
                 Do.do (File.exists targetPath) <| \exists ->
-                if exists && not input_.check then
+                if exists && not input_.check && not input_.debug then
                     BackendTask.succeed ( target, { deps = newDeps, warnings = state.warnings } )
 
                 else
@@ -862,6 +862,14 @@ withMemoryLimitInBytes limit (BuildTask name (Monad f)) =
     build name
         (\input_ state ->
             f { input_ | memoryLimit = Just limit } state
+        )
+
+
+withDebug : (String -> Never) -> BuildTask e v -> BuildTask e v
+withDebug _ (BuildTask name (Monad f)) =
+    build name
+        (\input_ state ->
+            f { input_ | debug = True } state
         )
 
 
