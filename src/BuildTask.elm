@@ -9,6 +9,7 @@ module BuildTask exposing
     , Warning, withWarning, withWarnings
     , jobs, triggerDebugger, fromResult
     , withEnv, withMemoryLimitInGB, withDebug
+    , withIdlePriority
     )
 
 {-|
@@ -242,6 +243,7 @@ inputs inputPaths =
             { memoryLimit = Nothing
             , prefix = []
             , env = Dict.empty
+            , idlePriority = False
             }
             "b3sum"
             (List.map Path.toString inputPaths)
@@ -530,6 +532,11 @@ withMemoryLimitInGB limit task =
     Internal.withMemoryLimitInBytes (limit * 1024 * 1024 * 1024) task
 
 
-withDebug : (String -> Never) -> BuildTask e v -> BuildTask e v
+withDebug : (String -> Never) -> BuildTask e a -> BuildTask e a
 withDebug todo task =
     Internal.withDebug todo task
+
+
+withIdlePriority : BuildTask e a -> BuildTask e a
+withIdlePriority task =
+    Internal.withIdlePriority task

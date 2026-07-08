@@ -1,4 +1,4 @@
-module BuildTask.Internal exposing (BuildTask(..), DownloadError(..), Error(..), Input, Monad, State, Warning, allowFatal, andThen, andThen2, combineBy, commandLog, commandLogWith, derive, downloadSHA256, execLog, extendHashWith, extractFromDirectory, fail, fatalToInternal, hashFromString, input, jobs, map, map2, map3, map4, map5, mapError, named, run, sequence, succeed, timed, toResult, triggerDebugger, withDebug, withEnv, withFile, withMemoryLimitInBytes, withPrefix, withWarning)
+module BuildTask.Internal exposing (BuildTask(..), DownloadError(..), Error(..), Input, Monad, State, Warning, allowFatal, andThen, andThen2, combineBy, commandLog, commandLogWith, derive, downloadSHA256, execLog, extendHashWith, extractFromDirectory, fail, fatalToInternal, hashFromString, input, jobs, map, map2, map3, map4, map5, mapError, named, run, sequence, succeed, timed, toResult, triggerDebugger, withDebug, withEnv, withFile, withIdlePriority, withMemoryLimitInBytes, withPrefix, withWarning)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Customs
@@ -52,6 +52,7 @@ type alias Input =
     , debug : Bool
     , check : Bool
     , keepFailed : Bool
+    , idlePriority : Bool
     , hashKind : Hash.Kind
     , env : Dict String String
     , memoryLimit : Maybe Int
@@ -396,6 +397,7 @@ run config buildPath m =
             , keepFailed = config.keepFailed
             , env = Dict.empty
             , memoryLimit = Nothing
+            , idlePriority = False
             }
     in
     runMonad m input_ { deps = HashSet.empty, warnings = Set.empty }
@@ -670,13 +672,32 @@ downloadSHA256 { url, sha256 } =
 
 
 {-| -}
-commandLog : { a | memoryLimit : Maybe Int, prefix : List String, env : Dict String String } -> String -> List String -> BackendTask { fatal : FatalError, recoverable : Stream.Error Int String } String
+commandLog :
+    { a
+        | memoryLimit : Maybe Int
+        , prefix : List String
+        , env : Dict String String
+        , idlePriority : Bool
+    }
+    -> String
+    -> List String
+    -> BackendTask { fatal : FatalError, recoverable : Stream.Error Int String } String
 commandLog input_ cmd args =
     commandLogWith input_ CommandOptions.default cmd args
 
 
 {-| -}
-commandLogWith : { a | memoryLimit : Maybe Int, prefix : List String, env : Dict String String } -> CommandOptions -> String -> List String -> BackendTask { fatal : FatalError, recoverable : Stream.Error Int String } String
+commandLogWith :
+    { a
+        | memoryLimit : Maybe Int
+        , prefix : List String
+        , env : Dict String String
+        , idlePriority : Bool
+    }
+    -> CommandOptions
+    -> String
+    -> List String
+    -> BackendTask { fatal : FatalError, recoverable : Stream.Error Int String } String
 commandLogWith input_ options cmd args =
     wrapCommand input_ options cmd args
         |> Stream.read
@@ -693,35 +714,36 @@ execLog input_ cmd args =
 
 
 wrapCommand :
-    { a | memoryLimit : Maybe Int }
+    { a
+        | memoryLimit : Maybe Int
+        , idlePriority : Bool
+    }
     -> CommandOptions
     -> String
     -> List String
     -> Stream Int () { read : read, write : write }
 wrapCommand input_ options cmd args =
-    case input_.memoryLimit of
-        Nothing ->
-            Stream.commandWithOptions
-                (CommandOptions.toStreamCommandOptions options)
-                cmd
-                args
+    let
+        memoryArg : String
+        memoryArg =
+            case input_.memoryLimit of
+                Nothing ->
+                    ""
 
-        Just limit ->
-            let
-                kilo : Int
-                kilo =
-                    1024
+                Just limit ->
+                    let
+                        kilo : Int
+                        kilo =
+                            1024
 
-                mega : Int
-                mega =
-                    kilo * 1024
+                        mega : Int
+                        mega =
+                            kilo * 1024
 
-                giga : Int
-                giga =
-                    mega * 1024
-
-                limitString : String
-                limitString =
+                        giga : Int
+                        giga =
+                            mega * 1024
+                    in
                     if modBy giga limit == 0 then
                         String.fromInt (limit // giga) ++ "G"
 
@@ -733,20 +755,46 @@ wrapCommand input_ options cmd args =
 
                     else
                         String.fromInt limit
-            in
-            Stream.commandWithOptions
+
+        cpuWeightArg : String
+        cpuWeightArg =
+            if input_.idlePriority then
+                "CPUWeight=weight"
+
+            else
+                ""
+    in
+    if String.isEmpty memoryArg && String.isEmpty cpuWeightArg then
+        Stream.commandWithOptions
+            (CommandOptions.toStreamCommandOptions options)
+            cmd
+            args
+
+    else
+        ([ "--quiet"
+         , "--user"
+         , "--scope"
+         ]
+            ++ (if String.isEmpty memoryArg then
+                    []
+
+                else
+                    [ "-p", "MemoryMax=" ++ memoryArg ]
+               )
+            ++ (if String.isEmpty cpuWeightArg then
+                    []
+
+                else
+                    [ "-p", cpuWeightArg ]
+               )
+            ++ [ "--"
+               , cmd
+               ]
+            ++ args
+        )
+            |> Stream.commandWithOptions
                 (CommandOptions.toStreamCommandOptions options)
                 "systemd-run"
-                ([ "--quiet"
-                 , "--scope"
-                 , "-p"
-                 , "MemoryMax=" ++ limitString
-                 , "--user"
-                 , "--"
-                 , cmd
-                 ]
-                    ++ args
-                )
 
 
 {-| -}
@@ -865,11 +913,19 @@ withMemoryLimitInBytes limit (BuildTask name (Monad f)) =
         )
 
 
-withDebug : (String -> Never) -> BuildTask e v -> BuildTask e v
+withDebug : (String -> Never) -> BuildTask e a -> BuildTask e a
 withDebug _ (BuildTask name (Monad f)) =
     build name
         (\input_ state ->
             f { input_ | debug = True } state
+        )
+
+
+withIdlePriority : BuildTask e a -> BuildTask e a
+withIdlePriority (BuildTask name (Monad f)) =
+    build name
+        (\input_ state ->
+            f { input_ | idlePriority = True } state
         )
 
 
