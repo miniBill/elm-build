@@ -2,7 +2,7 @@ module BuildTask.Unsafe exposing (commandInReadonlyDirectory, commandInWritableD
 
 {-| -}
 
-import BackendTask
+import BackendTask exposing (BackendTask)
 import BackendTask.Do as Do
 import BackendTask.Extra
 import BackendTask.File as File
@@ -10,10 +10,10 @@ import BackendTask.File.Extra
 import BackendTask.Http as Http
 import BackendTask.Stream as Stream
 import BuildTask exposing (BuildTask, FileOrDirectory)
-import BuildTask.Internal as Internal exposing (Error(..))
+import BuildTask.Internal as Internal exposing (Error(..), Input)
 import CommandOptions exposing (CommandOptions)
 import FatalError exposing (FatalError)
-import Hash
+import Hash exposing (Hash)
 import List.Extra
 import Pages.Script as Script
 import Utils
@@ -183,16 +183,7 @@ commandInWritableDirectoryWith : CommandOptions -> String -> List String -> File
 commandInWritableDirectoryWith options cmd args hash =
     BuildTask.do (Internal.extendHashWith ("commandInWritableDirectoryWith" :: CommandOptions.toStringList options ++ cmd :: args) hash) <| \outputHash ->
     Internal.derive (String.join " " ("commandInWritableDirectory" :: cmd :: args)) outputHash <| \({ buildPath, keepFailed, debug } as input) target ->
-    let
-        workspacePath : String
-        workspacePath =
-            Hash.toPathWorkspace buildPath (Hash.toWorkspace target)
-    in
-    Do.do
-        (BackendTask.File.Extra.removeFileIfExists workspacePath
-            |> BackendTask.mapError Internal.InternalError
-        )
-    <| \_ ->
+    withWorkspace input (Hash.toWorkspace target) <| \workspacePath ->
     Do.do
         (Script.exec "cp" [ "-r", Hash.toPath buildPath hash, workspacePath ]
             |> BackendTask.mapError Internal.InternalError
@@ -207,25 +198,8 @@ commandInWritableDirectoryWith options cmd args hash =
         (Internal.commandLogWith input options cmd args
             |> BackendTask.inDir workspacePath
             |> BackendTask.mapError Internal.UserError
-            |> BackendTask.Extra.finally
-                (if keepFailed || debug then
-                    BackendTask.succeed ()
-
-                 else
-                    BackendTask.File.Extra.removeFileIfExists workspacePath
-                        |> BackendTask.mapError Internal.InternalError
-                )
         )
     <| \output ->
-    Do.do
-        (if keepFailed && not debug then
-            BackendTask.File.Extra.removeFileIfExists workspacePath
-                |> BackendTask.mapError Internal.InternalError
-
-         else
-            BackendTask.succeed ()
-        )
-    <| \() ->
     Script.writeFile { path = Hash.toPathTemporary buildPath target, body = output }
         |> BackendTask.allowFatal
         |> BackendTask.mapError Internal.InternalError
@@ -356,16 +330,7 @@ patchFileInDirectory hash filename { description } patch =
     BuildTask.do (Internal.extendHashWith [ "Patch", filename, description ] hash) <| \outputHash ->
     -- BuildTask.do (BuildTask.fail (FatalError.fromString "MEEP") |> Internal.fatalToInternal) <| \_ ->
     Internal.derive ("Patch " ++ filename ++ " with " ++ description) outputHash <| \({ keepFailed, debug, buildPath } as input) target ->
-    let
-        workspacePath : String
-        workspacePath =
-            Hash.toPathWorkspace buildPath (Hash.toWorkspace target)
-    in
-    Do.do
-        (BackendTask.File.Extra.removeFileIfExists workspacePath
-            |> BackendTask.mapError Internal.InternalError
-        )
-    <| \_ ->
+    withWorkspace input (Hash.toWorkspace target) <| \workspacePath ->
     Do.do
         (Script.exec "cp" [ "-r", Hash.toPath buildPath hash, workspacePath ]
             |> BackendTask.mapError Internal.InternalError
@@ -386,24 +351,45 @@ patchFileInDirectory hash filename { description } patch =
                     }
                     |> BackendTask.allowFatal
                     |> BackendTask.mapError Internal.InternalError
-                    |> BackendTask.Extra.finally
-                        (if keepFailed || debug then
-                            BackendTask.succeed ()
-
-                         else
-                            BackendTask.File.Extra.removeFileIfExists workspacePath
-                                |> BackendTask.mapError Internal.InternalError
-                        )
             )
         |> BackendTask.and
             (Internal.execLog input "cp" [ "-rl", workspacePath, Hash.toPathTemporary buildPath target ]
                 |> BackendTask.mapError Internal.InternalError
             )
-        |> BackendTask.and
-            (if keepFailed && not debug then
-                BackendTask.File.Extra.removeFileIfExists workspacePath
-                    |> BackendTask.mapError Internal.InternalError
 
-             else
-                BackendTask.succeed ()
+
+withWorkspace : Input -> Hash Hash.Workspace -> (String -> BackendTask (Error e) ()) -> BackendTask (Error e) ()
+withWorkspace input workspace task =
+    let
+        workspacePath : String
+        workspacePath =
+            Hash.toPathWorkspace input.buildPath workspace
+    in
+    Do.do
+        (BackendTask.File.Extra.removeFileIfExists workspacePath
+            |> BackendTask.mapError Internal.InternalError
+        )
+    <| \_ ->
+    task workspacePath
+        |> BackendTask.toResult
+        |> BackendTask.andThen
+            (\r ->
+                case r of
+                    Err e ->
+                        if input.keepFailed || input.debug then
+                            BackendTask.fail e
+
+                        else
+                            BackendTask.File.Extra.removeFileIfExists workspacePath
+                                |> BackendTask.mapError Internal.InternalError
+                                |> BackendTask.andThen (\_ -> BackendTask.fail e)
+
+                    Ok o ->
+                        if input.debug then
+                            BackendTask.succeed o
+
+                        else
+                            BackendTask.File.Extra.removeFileIfExists workspacePath
+                                |> BackendTask.mapError Internal.InternalError
+                                |> BackendTask.map (\_ -> o)
             )
