@@ -276,11 +276,24 @@ equalsHelp lq rq =
 
 unionAll : List (BST comparable) -> BST comparable
 unionAll list =
-    unionAllHelp list []
+    unionAllFirstStage [] list
 
 
-unionAllHelp : List (BST comparable) -> List (BST comparable) -> BST comparable
-unionAllHelp queue acc =
+unionAllFirstStage : List (List comparable) -> List (BST comparable) -> BST comparable
+unionAllFirstStage acc queue =
+    case queue of
+        [] ->
+            unionAllHelp [] acc
+
+        [ x ] ->
+            unionAllFirstStage (toList x :: acc) []
+
+        first :: second :: rest ->
+            unionAllFirstStage (mergeSorted (toList first) (toList second) [] :: acc) rest
+
+
+unionAllHelp : List (List comparable) -> List (List comparable) -> BST comparable
+unionAllHelp acc queue =
     case queue of
         [] ->
             case acc of
@@ -288,13 +301,13 @@ unionAllHelp queue acc =
                     empty
 
                 [ x ] ->
-                    x
+                    fromSortedList x
 
                 _ ->
-                    unionAllHelp acc []
+                    unionAllHelp [] acc
 
         [ x ] ->
-            unionAllHelp [] (x :: acc)
+            unionAllHelp (x :: acc) []
 
         first :: second :: rest ->
-            unionAllHelp rest (union first second :: acc)
+            unionAllHelp (mergeSorted first second [] :: acc) rest
