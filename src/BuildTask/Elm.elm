@@ -1,10 +1,8 @@
-module BuildTask.Elm exposing (CodegenError(..), codegen, format)
+module BuildTask.Elm exposing (CodegenError, codegen, format)
 
-import BackendTask exposing (BackendTask)
 import BackendTask.File as File
 import BackendTask.Stream as Stream
 import BuildTask exposing (BuildTask, FileOrDirectory)
-import BuildTask.Do as Do
 import BuildTask.Unsafe as Unsafe
 import FatalError exposing (FatalError)
 import Hash

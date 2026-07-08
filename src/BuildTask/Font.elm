@@ -1,11 +1,10 @@
-module BuildTask.Font exposing (Data, Style(..), Weight(..), parse, styleToString, toCssFile, weightToNumber)
+module BuildTask.Font exposing (Data, FontError, Style(..), Weight(..), parse, styleToString, toCssFile, weightToNumber)
 
 import BackendTask.File as File
 import BackendTask.Stream as Stream
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import BuildTask.Unsafe as Unsafe
-import BuildTask.Unsafe.Do as Do
-import FatalError exposing (FatalError, recoverable)
+import FatalError exposing (FatalError)
 import Path exposing (Path)
 import String.Multiline
 import Utils
@@ -113,7 +112,6 @@ parse hash =
 
 type FontError
     = UnrecognizedStyleOrWeight String
-    | StreamError String
     | FailedToParseFamilyAndStyle String
     | FailedToReadFile (File.FileReadError Never)
     | FailedToRunFcScan (Stream.Error Int String)

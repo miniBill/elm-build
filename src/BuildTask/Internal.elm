@@ -1,4 +1,4 @@
-module BuildTask.Internal exposing (BuildTask(..), DownloadError(..), Error(..), Input, State, Warning, allowFatal, andThen, andThen2, combineBy, commandLog, commandLogWith, derive, downloadSHA256, execLog, extendHashWith, extractFromDirectory, fail, fatalToInternal, hashFromString, input, jobs, map, map2, map3, map4, map5, mapError, named, run, sequence, succeed, timed, toResult, triggerDebugger, withEnv, withFile, withMemoryLimitInBytes, withPrefix, withWarning)
+module BuildTask.Internal exposing (BuildTask(..), DownloadError(..), Error(..), Input, Monad, State, Warning, allowFatal, andThen, andThen2, combineBy, commandLog, commandLogWith, derive, downloadSHA256, execLog, extendHashWith, extractFromDirectory, fail, fatalToInternal, hashFromString, input, jobs, map, map2, map3, map4, map5, mapError, named, run, sequence, succeed, timed, toResult, triggerDebugger, withEnv, withFile, withMemoryLimitInBytes, withPrefix, withWarning)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Customs
@@ -7,7 +7,7 @@ import BackendTask.Extra
 import BackendTask.File as File
 import BackendTask.File.Extra
 import BackendTask.Http as Http
-import BackendTask.Stream as Stream
+import BackendTask.Stream as Stream exposing (Stream)
 import CommandOptions exposing (CommandOptions)
 import FastDict as Dict exposing (Dict)
 import FastSet as Set exposing (Set)
@@ -15,7 +15,6 @@ import FatalError exposing (FatalError)
 import Hash exposing (Hash, Normal, Temporary)
 import HashSet exposing (HashSet)
 import Hex
-import Json.Encode
 import List.Extra
 import Pages.Script as Script
 import Path exposing (Path)
@@ -192,10 +191,16 @@ runMonad (BuildTask label (Monad m)) input_ state =
                             BackendTask.succeed ( v, newState )
 
                         else
-                            BackendTask.fail (InternalError (FatalError.fromString ("Missed warning inside " ++ label)))
+                            ("Missed warning inside " ++ label)
+                                |> FatalError.fromString
+                                |> InternalError
+                                |> BackendTask.fail
 
                     else
-                        BackendTask.fail (InternalError (FatalError.fromString ("Missed dependency inside " ++ label)))
+                        ("Missed dependency inside " ++ label)
+                            |> FatalError.fromString
+                            |> InternalError
+                            |> BackendTask.fail
                 )
 
     else
@@ -539,7 +544,7 @@ fail msg =
         |> andThen
             (\_ ->
                 build "fail"
-                    (\{ prefix } _ ->
+                    (\_ _ ->
                         BackendTask.fail (UserError msg)
                      -- (FatalError.build
                      --     { title = String.join " " (prefix ++ [ "-", "build error" ])
@@ -579,7 +584,7 @@ triggerDebugger =
 input : Path -> BuildTask FatalError (Hash Normal)
 input inputPath =
     build "input"
-        (\({ prefix, env } as input_) deps ->
+        (\input_ deps ->
             Do.do
                 (commandLog input_ "b3sum" [ Path.toString inputPath ]
                     |> BackendTask.allowFatal
@@ -595,7 +600,7 @@ input inputPath =
         )
         |> andThen
             (\hash ->
-                derive "input" hash <| \{ prefix, buildPath } target ->
+                derive "input" hash <| \{ buildPath } target ->
                 Script.copyFile { from = Path.toString inputPath, to = Hash.toPathTemporary buildPath target }
                     |> BackendTask.mapError UserError
             )
@@ -624,7 +629,7 @@ downloadSHA256 { url, sha256 } =
                 fail (InvalidHashHex sha256)
 
             Ok hex ->
-                derive "downloadSHA256" (Hash.build hex) <| \({ prefix, buildPath, env } as input_) target ->
+                derive "downloadSHA256" (Hash.build hex) <| \({ buildPath } as input_) target ->
                 let
                     tmpPath : String
                     tmpPath =
@@ -692,7 +697,7 @@ wrapCommand :
     -> CommandOptions
     -> String
     -> List String
-    -> Stream.Stream Int () { read : read, write : write }
+    -> Stream Int () { read : read, write : write }
 wrapCommand input_ options cmd args =
     case input_.memoryLimit of
         Nothing ->

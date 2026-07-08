@@ -9,14 +9,13 @@ import BackendTask.File as File
 import BackendTask.File.Extra
 import BackendTask.Http as Http
 import BackendTask.Stream as Stream
-import BuildTask exposing (BuildTask, DownloadError, FileOrDirectory)
+import BuildTask exposing (BuildTask, FileOrDirectory)
 import BuildTask.Internal as Internal exposing (Error(..))
 import CommandOptions exposing (CommandOptions)
 import FatalError exposing (FatalError)
 import Hash
 import List.Extra
 import Pages.Script as Script
-import Path
 import Utils
 
 
@@ -123,9 +122,9 @@ commandInReadonlyDirectory :
     -> BuildTask { fatal : FatalError, recoverable : Stream.Error Int String } FileOrDirectory
 commandInReadonlyDirectory cmd args hash =
     BuildTask.do (Internal.extendHashWith (cmd :: args) hash) <| \outputHash ->
-    Internal.derive (String.join " " ("commandInReadonlyDirectory" :: cmd :: args)) outputHash <| \({ prefix, env, buildPath } as input_) target ->
+    Internal.derive (String.join " " ("commandInReadonlyDirectory" :: cmd :: args)) outputHash <| \({ buildPath } as input) target ->
     Do.do
-        (Internal.commandLog input_ cmd args
+        (Internal.commandLog input cmd args
             |> BackendTask.inDir (Hash.toPath buildPath hash)
             |> BackendTask.mapError Internal.UserError
         )
@@ -183,7 +182,7 @@ In particular, the command must not:
 commandInWritableDirectoryWith : CommandOptions -> String -> List String -> FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error Int String } FileOrDirectory
 commandInWritableDirectoryWith options cmd args hash =
     BuildTask.do (Internal.extendHashWith ("commandInWritableDirectoryWith" :: CommandOptions.toStringList options ++ cmd :: args) hash) <| \outputHash ->
-    Internal.derive (String.join " " ("commandInWritableDirectory" :: cmd :: args)) outputHash <| \({ prefix, buildPath, env, keepFailed } as input_) target ->
+    Internal.derive (String.join " " ("commandInWritableDirectory" :: cmd :: args)) outputHash <| \({ buildPath, keepFailed } as input) target ->
     let
         workspacePath : String
         workspacePath =
@@ -205,7 +204,7 @@ commandInWritableDirectoryWith options cmd args hash =
         )
     <| \_ ->
     Do.do
-        (Internal.commandLogWith input_ options cmd args
+        (Internal.commandLogWith input options cmd args
             |> BackendTask.inDir workspacePath
             |> BackendTask.mapError Internal.UserError
             |> BackendTask.Extra.finally
@@ -303,9 +302,9 @@ commandWithFile :
     -> BuildTask { fatal : FatalError, recoverable : Stream.Error Int String } FileOrDirectory
 commandWithFile cmd args hash =
     BuildTask.do (Internal.extendHashWith (cmd :: args) hash) <| \outputHash ->
-    Internal.derive (String.join " " ("commandWithFile" :: cmd :: args)) outputHash <| \({ prefix, buildPath, env } as input_) target ->
+    Internal.derive (String.join " " ("commandWithFile" :: cmd :: args)) outputHash <| \({ buildPath } as input) target ->
     Do.do
-        (Internal.commandLog input_ cmd (args ++ [ Hash.toPath buildPath hash ])
+        (Internal.commandLog input cmd (args ++ [ Hash.toPath buildPath hash ])
             |> BackendTask.mapError Internal.UserError
         )
     <| \output ->
@@ -352,7 +351,7 @@ patchFileInDirectory :
 patchFileInDirectory hash filename { description } patch =
     BuildTask.do (Internal.extendHashWith [ "Patch", filename, description ] hash) <| \outputHash ->
     -- BuildTask.do (BuildTask.fail (FatalError.fromString "MEEP") |> Internal.fatalToInternal) <| \_ ->
-    Internal.derive ("Patch " ++ filename ++ " with " ++ description) outputHash <| \({ keepFailed, prefix, env, buildPath } as input_) target ->
+    Internal.derive ("Patch " ++ filename ++ " with " ++ description) outputHash <| \({ keepFailed, buildPath } as input) target ->
     let
         workspacePath : String
         workspacePath =
@@ -393,7 +392,7 @@ patchFileInDirectory hash filename { description } patch =
                         )
             )
         |> BackendTask.and
-            (Internal.execLog input_ "cp" [ "-rl", workspacePath, Hash.toPathTemporary buildPath target ]
+            (Internal.execLog input "cp" [ "-rl", workspacePath, Hash.toPathTemporary buildPath target ]
                 |> BackendTask.mapError Internal.InternalError
             )
         |> BackendTask.and

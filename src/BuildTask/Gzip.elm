@@ -2,7 +2,7 @@ module BuildTask.Gzip exposing (gunzip, gzip)
 
 import BackendTask.Stream as Stream
 import BuildTask exposing (FileOrDirectory)
-import BuildTask.Internal exposing (BuildTask, Error)
+import BuildTask.Internal exposing (BuildTask)
 import BuildTask.Unsafe
 import FatalError exposing (FatalError)
 

@@ -72,7 +72,7 @@ import BackendTask.File as File
 import BuildTask.Internal as Internal
 import FastDict as Dict exposing (Dict)
 import FastSet exposing (Set)
-import FatalError exposing (FatalError, recoverable)
+import FatalError exposing (FatalError)
 import Hash exposing (Hash)
 import Pages.Script as Script
 import Path exposing (Path)
@@ -253,7 +253,7 @@ inputs inputPaths =
             case Hash.fromChecksum line of
                 Ok hash ->
                     ( inputPath
-                    , Internal.derive "inputs" hash <| \{ prefix, buildPath } target ->
+                    , Internal.derive "inputs" hash <| \{ buildPath } target ->
                     Script.copyFile
                         { from = Path.toString inputPath
                         , to = Hash.toPathTemporary buildPath target
@@ -363,7 +363,7 @@ combineTree (Tree tree) =
                 |> Internal.hashFromString
     in
     do outputHash <| \combinedHash ->
-    Internal.derive "combine" combinedHash <| \({ prefix, buildPath, env } as input_) target ->
+    Internal.derive "combine" combinedHash <| \({ buildPath } as input_) target ->
     Do.do
         (Script.makeDirectory { recursive = True } (Hash.toPathTemporary buildPath target)
             |> BackendTask.mapError Internal.InternalError
@@ -387,7 +387,7 @@ doWithError :
     -> (a -> BuildTask { recoverable : f, fatal : FatalError } b)
     -> BuildTask { recoverable : f, fatal : FatalError } b
 doWithError x e f =
-    andThen f (mapRecoverableError e x)
+    mapRecoverableError e x |> andThen f
 
 
 {-| -}

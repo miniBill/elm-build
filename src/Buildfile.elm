@@ -4,11 +4,10 @@ import BackendTask exposing (BackendTask)
 import BackendTask.Glob as Glob
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import BuildTask.Do as Do
-import BuildTask.Elm as Elm exposing (CodegenError)
+import BuildTask.Elm as Elm
 import BuildTask.Font as Font
 import BuildTask.Image as Image
 import BuildTask.Unsafe as Unsafe
-import BuildTask.Unsafe.Do as Do
 import Elm
 import Elm.Annotation
 import Elm.Arg
@@ -23,7 +22,6 @@ import Gen.Html.Picture
 import Gen.Html.Source
 import Gen.List
 import Gen.String
-import Json.Encode
 import List.Extra
 import Maybe.Extra
 import Pages.Script as Script
