@@ -8,8 +8,7 @@ module BuildTask exposing
     , withPrefix, timed
     , Warning, withWarning, withWarnings
     , jobs, triggerDebugger, fromResult
-    , withEnv, withMemoryLimitInGB, withDebug
-    , withIdlePriority
+    , withEnv, withMemoryLimitInGB, withDebug, withIdlePriority
     )
 
 {-|
@@ -62,7 +61,7 @@ module BuildTask exposing
 
 ## Advanced
 
-@docs withEnv, withMemoryLimitInGB, withDebug
+@docs withEnv, withMemoryLimitInGB, withDebug, withIdlePriority
 
 -}
 

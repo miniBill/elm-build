@@ -758,7 +758,7 @@ wrapCommand input_ options cmd args =
         cpuWeightArg : String
         cpuWeightArg =
             if input_.idlePriority then
-                "CPUWeight=weight"
+                "CPUWeight=idle"
 
             else
                 ""
