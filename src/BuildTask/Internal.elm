@@ -1,4 +1,4 @@
-module BuildTask.Internal exposing (BuildTask(..), DownloadError(..), Error(..), Input, Monad, State, Warning, allowFatal, andThen, andThen2, combineBy, commandLog, commandLogWith, derive, downloadSHA256, execLog, extendHashWith, extractFromDirectory, fail, fatalToInternal, hashFromString, input, jobs, map, map2, map3, map4, map5, mapError, named, run, sequence, succeed, timed, toResult, triggerDebugger, withDebug, withEnv, withFile, withIdlePriority, withMemoryLimitInBytes, withPrefix, withWarning)
+module BuildTask.Internal exposing (BuildTask(..), DownloadError(..), Error(..), Input, State, Warning, allowFatal, andThen, andThen2, combineBy, commandLog, commandLogWith, derive, downloadSHA256, execLog, extendHashWith, extractFromDirectory, fail, fatalToInternal, hashFromString, input, jobs, map, map2, map3, map4, map5, mapError, named, run, sequence, succeed, timed, toResult, triggerDebugger, withDebug, withEnv, withFile, withIdlePriority, withMemoryLimitInBytes, withPrefix, withWarning)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Customs
@@ -22,11 +22,7 @@ import Utils
 
 
 type BuildTask e a
-    = BuildTask String (Monad (Input -> State -> BackendTask (Error e) ( a, State )))
-
-
-type Monad a
-    = Monad a
+    = BuildTask String (Input -> State -> BackendTask (Error e) ( a, State ))
 
 
 type Error e
@@ -59,11 +55,6 @@ type alias Input =
     }
 
 
-build : String -> (Input -> State -> BackendTask (Error e) ( a, State )) -> BuildTask e a
-build name f =
-    BuildTask name (Monad f)
-
-
 {-| Core primitive.
 
 **CORRECTNESS:**
@@ -82,7 +73,7 @@ derive :
         )
     -> BuildTask e (Hash Normal)
 derive description target inner =
-    build "derive"
+    BuildTask "derive"
         (\({ existing, buildPath } as input_) state ->
             let
                 newDeps : HashSet
@@ -182,7 +173,7 @@ derive description target inner =
 
 
 runMonad : BuildTask e a -> Input -> State -> BackendTask (Error e) ( a, State )
-runMonad (BuildTask label (Monad m)) input_ state =
+runMonad (BuildTask label m) input_ state =
     if input_.debug then
         Dict.foldl BackendTask.withEnv (m input_ state) input_.env
             |> BackendTask.andThen
@@ -211,7 +202,7 @@ runMonad (BuildTask label (Monad m)) input_ state =
 {-| -}
 map : (a -> b) -> BuildTask e a -> BuildTask e b
 map f m =
-    build "map"
+    BuildTask "map"
         (\input_ deps ->
             runMonad m input_ deps
                 |> BackendTask.map
@@ -228,7 +219,7 @@ map2 :
     -> BuildTask e b
     -> BuildTask e c
 map2 f a b =
-    build "map2"
+    BuildTask "map2"
         (\input_ deps ->
             BackendTask.map2
                 (\( va, outputA ) ( vb, outputB ) ->
@@ -265,7 +256,7 @@ map3 :
     -> BuildTask e c
     -> BuildTask e d
 map3 f a b c =
-    build "map3"
+    BuildTask "map3"
         (\input_ deps ->
             BackendTask.map3
                 (\( va, outputA ) ( vb, outputB ) ( vc, outputC ) ->
@@ -286,7 +277,7 @@ map4 :
     -> BuildTask e d
     -> BuildTask e r
 map4 f a b c d =
-    build "map4"
+    BuildTask "map4"
         (\input_ deps ->
             BackendTask.map4
                 (\( va, outputA ) ( vb, outputB ) ( vc, outputC ) ( vd, outputD ) ->
@@ -311,7 +302,7 @@ map5 :
     -> BuildTask e f
     -> BuildTask e g
 map5 f a b c d e =
-    build "map5"
+    BuildTask "map5"
         (\input_ deps ->
             BackendTask.map5
                 (\( va, outputA ) ( vb, outputB ) ( vc, outputC ) ( vd, outputD ) ( ve, outputE ) ->
@@ -330,7 +321,7 @@ map5 f a b c d e =
 {-| -}
 andThen : (a -> BuildTask e b) -> BuildTask e a -> BuildTask e b
 andThen f m =
-    build "andThen"
+    BuildTask "andThen"
         (\input_ deps ->
             runMonad m input_ deps
                 |> BackendTask.andThen
@@ -343,7 +334,7 @@ andThen f m =
 {-| -}
 andThen2 : (a -> b -> BuildTask e c) -> BuildTask e a -> BuildTask e b -> BuildTask e c
 andThen2 f l r =
-    build "andThen2"
+    BuildTask "andThen2"
         (\input_ deps ->
             BackendTask.map2
                 Tuple.pair
@@ -361,7 +352,7 @@ withFile :
     -> (String -> BuildTask { fatal : FatalError, recoverable : File.FileReadError decoderError } a)
     -> BuildTask { fatal : FatalError, recoverable : File.FileReadError decoderError } a
 withFile hash f =
-    build "withFile"
+    BuildTask "withFile"
         (\({ buildPath } as input_) state ->
             Do.do
                 (File.rawFile (Hash.toPath buildPath hash)
@@ -438,7 +429,7 @@ listExisting path =
 
 combineBy : Int -> List (BuildTask e a) -> BuildTask e (List a)
 combineBy n ops =
-    build "combineBy"
+    BuildTask "combineBy"
         (\input_ deps ->
             case ops of
                 [] ->
@@ -460,7 +451,7 @@ combineBy n ops =
 
 sequence : List (BuildTask e a) -> BuildTask e (List a)
 sequence ops =
-    build "sequence"
+    BuildTask "sequence"
         (\input_ deps ->
             if List.isEmpty ops then
                 BackendTask.succeed ( [], deps )
@@ -480,17 +471,17 @@ sequence ops =
 
 timed : String -> String -> BuildTask e a -> BuildTask e a
 timed before after task =
-    build "timed" (\input_ deps -> BackendTask.Extra.timed before after (runMonad task input_ deps))
+    BuildTask "timed" (\input_ deps -> BackendTask.Extra.timed before after (runMonad task input_ deps))
 
 
 withPrefix : String -> BuildTask e a -> BuildTask e a
 withPrefix newPrefix m =
-    build "withPrefix" (\input_ deps -> runMonad m { input_ | prefix = newPrefix :: input_.prefix } deps)
+    BuildTask "withPrefix" (\input_ deps -> runMonad m { input_ | prefix = newPrefix :: input_.prefix } deps)
 
 
 jobs : BuildTask e Int
 jobs =
-    build "jobs" (\input_ deps -> BackendTask.succeed ( input_.jobs, deps ))
+    BuildTask "jobs" (\input_ deps -> BackendTask.succeed ( input_.jobs, deps ))
 
 
 nproc : BackendTask FatalError Int
@@ -537,12 +528,12 @@ nproc =
 
 succeed : a -> BuildTask e a
 succeed v =
-    build "succeed" (\_ deps -> BackendTask.succeed ( v, deps ))
+    BuildTask "succeed" (\_ deps -> BackendTask.succeed ( v, deps ))
 
 
 fail : msg -> BuildTask msg a
 fail msg =
-    build "checkIfDebug" (\{ debug } deps -> BackendTask.succeed ( debug, deps ))
+    BuildTask "checkIfDebug" (\{ debug } deps -> BackendTask.succeed ( debug, deps ))
         |> andThen
             (\debug ->
                 if debug then
@@ -553,7 +544,7 @@ fail msg =
             )
         |> andThen
             (\_ ->
-                build "fail"
+                BuildTask "fail"
                     (\_ _ ->
                         BackendTask.fail (UserError msg)
                      -- (FatalError.build
@@ -567,7 +558,7 @@ fail msg =
 
 withWarning : Warning -> BuildTask e a -> BuildTask e a
 withWarning warning ((BuildTask n _) as t) =
-    build n
+    BuildTask n
         (\input_ deps ->
             runMonad t input_ deps
                 |> BackendTask.map
@@ -583,7 +574,7 @@ withWarning warning ((BuildTask n _) as t) =
 
 triggerDebugger : BuildTask e ()
 triggerDebugger =
-    build "triggerDebugger"
+    BuildTask "triggerDebugger"
         (\_ deps ->
             BackendTask.Customs.triggerDebugger
                 |> BackendTask.map (\() -> ( (), deps ))
@@ -593,7 +584,7 @@ triggerDebugger =
 
 input : Path -> BuildTask FatalError (Hash Normal)
 input inputPath =
-    build "input"
+    BuildTask "input"
         (\input_ deps ->
             Do.do
                 (commandLog input_ "b3sum" [ Path.toString inputPath ]
@@ -838,7 +829,7 @@ named name encode action param =
         |> hashFromString
         |> andThen
             (\hash ->
-                build "named"
+                BuildTask "named"
                     (\input_ state ->
                         if HashSet.member hash input_.existing || HashSet.member hash state.deps then
                             ( hash
@@ -878,7 +869,7 @@ extendHashWith l r =
 
 hashFromString : String -> BuildTask e (Hash Normal)
 hashFromString raw =
-    build "fromString"
+    BuildTask "fromString"
         (\{ hashKind } deps ->
             BackendTask.succeed ( Hash.fromString raw hashKind, deps )
         )
@@ -886,7 +877,7 @@ hashFromString raw =
 
 toResult : BuildTask e a -> BuildTask x (Result e a)
 toResult ((BuildTask name _) as f) =
-    build name
+    BuildTask name
         (\input_ deps ->
             runMonad f input_ deps
                 |> BackendTask.toResult
@@ -906,32 +897,32 @@ toResult ((BuildTask name _) as f) =
 
 
 withEnv : List ( String, String ) -> BuildTask e a -> BuildTask e a
-withEnv env (BuildTask name (Monad f)) =
-    build name
+withEnv env (BuildTask name f) =
+    BuildTask name
         (\input_ state ->
             f { input_ | env = Dict.union (Dict.fromList env) input_.env } state
         )
 
 
 withMemoryLimitInBytes : Int -> BuildTask e a -> BuildTask e a
-withMemoryLimitInBytes limit (BuildTask name (Monad f)) =
-    build name
+withMemoryLimitInBytes limit (BuildTask name f) =
+    BuildTask name
         (\input_ state ->
             f { input_ | memoryLimit = Just limit } state
         )
 
 
 withDebug : (String -> Never) -> BuildTask e a -> BuildTask e a
-withDebug _ (BuildTask name (Monad f)) =
-    build name
+withDebug _ (BuildTask name f) =
+    BuildTask name
         (\input_ state ->
             f { input_ | debug = True } state
         )
 
 
 withIdlePriority : BuildTask e a -> BuildTask e a
-withIdlePriority (BuildTask name (Monad f)) =
-    build name
+withIdlePriority (BuildTask name f) =
+    BuildTask name
         (\input_ state ->
             f { input_ | idlePriority = True } state
         )
@@ -942,7 +933,7 @@ mapError :
     -> BuildTask e a
     -> BuildTask f a
 mapError f ((BuildTask name _) as t) =
-    build name
+    BuildTask name
         (\input_ state ->
             runMonad t input_ state
                 |> BackendTask.mapError
@@ -959,7 +950,7 @@ mapError f ((BuildTask name _) as t) =
 
 allowFatal : BuildTask { e | fatal : FatalError } a -> BuildTask FatalError a
 allowFatal ((BuildTask name _) as t) =
-    build name
+    BuildTask name
         (\input_ state ->
             runMonad t input_ state
                 |> BackendTask.mapError
@@ -976,7 +967,7 @@ allowFatal ((BuildTask name _) as t) =
 
 fatalToInternal : BuildTask FatalError a -> BuildTask e a
 fatalToInternal ((BuildTask name _) as t) =
-    build name
+    BuildTask name
         (\input_ state ->
             runMonad t input_ state
                 |> BackendTask.mapError
