@@ -1,13 +1,13 @@
-module Hash exposing (Hash, Kind(..), Normal, Temporary, Workspace, build, fromChecksum, fromString, toInt, toPath, toPathTemporary, toPathWorkspace, toString, toTemporary, toWorkspace)
+module Hash exposing (Hash, Kind(..), Normal, Temporary, Workspace, build, fromChecksum, fromString, toPath, toPathTemporary, toPathWorkspace, toString, toTemporary, toWorkspace)
 
 import FNV1a
 import Hex
 import Path exposing (Path)
-import Sha256
+import SHA256
 
 
 type Hash k
-    = Hash Int
+    = Hash String
 
 
 type Kind
@@ -27,11 +27,6 @@ type Workspace
     = Workspace
 
 
-toInt : Hash k -> Int
-toInt (Hash i) =
-    i
-
-
 {-| Build an hashed file from the output of shaXsum/b3sum.
 -}
 fromChecksum : String -> Result String (Hash Normal)
@@ -41,11 +36,10 @@ fromChecksum raw =
         clean =
             String.left 8 raw
     in
-    Hex.fromString clean
-        |> Result.map Hash
+    Ok (Hash clean)
 
 
-build : Int -> Hash Normal
+build : String -> Hash Normal
 build i =
     Hash i
 
@@ -67,7 +61,7 @@ toPathWorkspace buildPath hash =
 
 toString : Hash k -> String
 toString (Hash hash) =
-    hash |> Hex.toString |> String.padLeft 8 '0'
+    String.padLeft 8 '0' hash
 
 
 toTemporary : Hash Normal -> Hash Temporary
@@ -88,17 +82,11 @@ fromString raw hashKind =
         Fast ->
             raw
                 |> FNV1a.hash
+                |> Hex.fromWord32
                 |> Hash
 
         Secure ->
-            case Hex.fromString (Sha256.sha256 raw) of
-                Ok i ->
-                    Hash i
-
-                Err _ ->
-                    let
-                        _ =
-                            -- Crash
-                            modBy 0 0
-                    in
-                    fromString raw Secure
+            raw
+                |> SHA256.fromString
+                |> SHA256.toHex
+                |> Hash

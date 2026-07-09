@@ -1,7 +1,5 @@
 module BST exposing (BST, empty, equals, fromList, insert, member, toList, union, unionAll)
 
-import Array exposing (Array)
-
 
 type BST a
     = BSTNode a (BST a) (BST a)
@@ -303,7 +301,7 @@ unionAllHelp acc queue =
                 [ x ] ->
                     fromSortedList x
 
-                _ ->
+                _ :: _ :: _ ->
                     unionAllHelp [] acc
 
         [ x ] ->

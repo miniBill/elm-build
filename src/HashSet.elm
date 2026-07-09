@@ -2,14 +2,12 @@ module HashSet exposing (HashSet, empty, equals, fromList, insert, member, toLis
 
 import BST exposing (BST)
 import Hash exposing (Hash, Normal)
-import Hex
-import Result.Extra
 
 
 {-| Assumption: this will only contain normal hashes.
 -}
 type HashSet
-    = HashSet (BST Int)
+    = HashSet (BST String)
 
 
 empty : HashSet
@@ -19,12 +17,12 @@ empty =
 
 member : Hash Normal -> HashSet -> Bool
 member x (HashSet s) =
-    BST.member (Hash.toInt x) s
+    BST.member (Hash.toString x) s
 
 
 insert : Hash Normal -> HashSet -> HashSet
 insert x (HashSet s) =
-    HashSet (BST.insert (Hash.toInt x) s)
+    HashSet (BST.insert (Hash.toString x) s)
 
 
 union : HashSet -> HashSet -> HashSet
@@ -41,13 +39,9 @@ toList (HashSet s) =
 fromList : List String -> Result String HashSet
 fromList list =
     list
-        |> Result.Extra.combineMap Hex.fromString
-        |> Result.map
-            (\l ->
-                l
-                    |> BST.fromList
-                    |> HashSet
-            )
+        |> BST.fromList
+        |> HashSet
+        |> Ok
 
 
 equals : HashSet -> HashSet -> Bool

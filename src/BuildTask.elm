@@ -2,7 +2,7 @@ module BuildTask exposing
     ( BuildTask, Error(..)
     , FileOrDirectory, input, inputs, downloadSHA256, DownloadError(..)
     , do, doWithError, succeed, fail
-    , writeFile, run
+    , writeFile, writeBytes, run
     , map, map2, map3, map4, map5, andThen, andThen2, combine, combineBy, combineInto, each, sequence, toResult, mapError, mapRecoverableError, allowFatal
     , withFile, readFromDirectory
     , withPrefix, timed
@@ -31,7 +31,7 @@ module BuildTask exposing
 
 ## Output
 
-@docs writeFile, run
+@docs writeFile, writeBytes, run
 
 
 ## Transforming and combining `Monad` values
@@ -66,10 +66,12 @@ module BuildTask exposing
 -}
 
 import BackendTask exposing (BackendTask)
+import BackendTask.Customs
 import BackendTask.Do as Do
 import BackendTask.Extra
 import BackendTask.File as File
 import BuildTask.Internal as Internal
+import Bytes exposing (Bytes)
 import FastDict as Dict exposing (Dict)
 import FastSet exposing (Set)
 import FatalError exposing (FatalError)
@@ -77,6 +79,7 @@ import Hash exposing (Hash)
 import Pages.Script as Script
 import Path exposing (Path)
 import Result.Extra
+import SHA256
 
 
 {-| -}
@@ -407,6 +410,18 @@ writeFile content =
     Internal.derive "writeFile" hash <| \{ buildPath } target ->
     Script.writeFile { path = Hash.toPathTemporary buildPath target, body = content }
         |> BackendTask.mapError Internal.UserError
+
+
+writeBytes : Bytes -> BuildTask FatalError FileOrDirectory
+writeBytes content =
+    case Hash.fromChecksum (SHA256.toHex (SHA256.fromBytes content)) of
+        Err e ->
+            Internal.fail (FatalError.fromString e) |> Internal.fatalToInternal
+
+        Ok hash ->
+            Internal.derive "writeBytes" hash <| \{ buildPath } target ->
+            BackendTask.Customs.writeBinaryFile { path = Hash.toPathTemporary buildPath target, body = content }
+                |> BackendTask.mapError Internal.UserError
 
 
 {-| -}

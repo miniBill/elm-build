@@ -10,7 +10,7 @@ import BackendTask.File.Extra
 import BackendTask.Http as Http
 import BackendTask.Stream as Stream
 import BuildTask exposing (BuildTask, FileOrDirectory)
-import BuildTask.Internal as Internal exposing (Error(..), Input)
+import BuildTask.Internal as Internal exposing (Error, Input)
 import CommandOptions exposing (CommandOptions)
 import FatalError exposing (FatalError)
 import Hash exposing (Hash)
@@ -182,7 +182,7 @@ In particular, the command must not:
 commandInWritableDirectoryWith : CommandOptions -> String -> List String -> FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error Int String } FileOrDirectory
 commandInWritableDirectoryWith options cmd args hash =
     BuildTask.do (Internal.extendHashWith ("commandInWritableDirectoryWith" :: CommandOptions.toStringList options ++ cmd :: args) hash) <| \outputHash ->
-    Internal.derive (String.join " " ("commandInWritableDirectory" :: cmd :: args)) outputHash <| \({ buildPath, keepFailed, debug } as input) target ->
+    Internal.derive (String.join " " ("commandInWritableDirectory" :: cmd :: args)) outputHash <| \({ buildPath } as input) target ->
     withWorkspace input (Hash.toWorkspace target) <| \workspacePath ->
     Do.do
         (Script.exec "cp" [ "-r", Hash.toPath buildPath hash, workspacePath ]
@@ -329,7 +329,7 @@ patchFileInDirectory :
 patchFileInDirectory hash filename { description } patch =
     BuildTask.do (Internal.extendHashWith [ "Patch", filename, description ] hash) <| \outputHash ->
     -- BuildTask.do (BuildTask.fail (FatalError.fromString "MEEP") |> Internal.fatalToInternal) <| \_ ->
-    Internal.derive ("Patch " ++ filename ++ " with " ++ description) outputHash <| \({ keepFailed, debug, buildPath } as input) target ->
+    Internal.derive ("Patch " ++ filename ++ " with " ++ description) outputHash <| \({ buildPath } as input) target ->
     withWorkspace input (Hash.toWorkspace target) <| \workspacePath ->
     Do.do
         (Script.exec "cp" [ "-r", Hash.toPath buildPath hash, workspacePath ]

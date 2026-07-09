@@ -15,11 +15,11 @@ import FastSet as Set exposing (Set)
 import FatalError exposing (FatalError)
 import Hash exposing (Hash, Normal, Temporary)
 import HashSet exposing (HashSet)
-import Hex
 import List.Extra
 import Pages.Script as Script
 import Path exposing (Path)
 import Utils
+import XBytes
 
 
 type BuildTask e a
@@ -626,12 +626,12 @@ downloadSHA256 { url, sha256 } =
         fail (WrongHashLength sha256)
 
     else
-        case Hex.fromString sha256 of
-            Err _ ->
+        case XBytes.fromHex sha256 of
+            Nothing ->
                 fail (InvalidHashHex sha256)
 
-            Ok hex ->
-                derive "downloadSHA256" (Hash.build hex) <| \({ buildPath } as input_) target ->
+            Just _ ->
+                derive "downloadSHA256" (Hash.build sha256) <| \({ buildPath } as input_) target ->
                 let
                     tmpPath : String
                     tmpPath =

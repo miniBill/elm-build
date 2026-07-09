@@ -11,8 +11,7 @@ import Path exposing (Path)
 
 
 type CodegenError
-    = FileIsEmpty
-    | ErrorWritingUnformattedFile Script.Error
+    = ErrorWritingUnformattedFile Script.Error
     | ErrorFormatting (Stream.Error () String)
     | ErrorReadingFormattedFile (File.FileReadError Never)
     | ElmFormatProducedAnEmptyFileFrom FileOrDirectory
