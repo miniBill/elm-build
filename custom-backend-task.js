@@ -13,7 +13,7 @@ export function triggerDebugger() {
     debugger;
 }
 
-export async function writeBinaryFile({ path, body, cwd }) {
+export async function writeBinaryFile({ path, body }, { cwd }) {
     const resolved = nodePath.resolve(cwd, path);
     const data = Buffer.from(body, "hex");
     await fs.writeFile(resolved, data);
