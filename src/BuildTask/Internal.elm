@@ -1,4 +1,4 @@
-module BuildTask.Internal exposing (BuildTask(..), DownloadError(..), Error(..), Input, State, Warning, allowFatal, andThen, andThen2, combineBy, commandLog, commandLogWith, derive, downloadSHA256, execLog, extendHashWith, extractFromDirectory, fail, fatalToInternal, getInternalTools, getTool, hashFromString, input, jobs, map, map2, map3, map4, map5, mapError, named, run, sequence, succeed, timed, toResult, triggerDebugger, which, withDebug, withEnv, withFile, withIdlePriority, withMemoryLimitInBytes, withPrefix, withWarning)
+module BuildTask.Internal exposing (BuildTask(..), DownloadError(..), Error(..), Input, State, Warning, allowFatal, andThen, andThen2, combineBy, commandLog, commandLogWith, derive, downloadSHA256, execLog, execUnlogged, extendHashWith, extractFromDirectory, fail, fatalToInternal, getInternalTools, getTool, hashFromString, input, jobs, map, map2, map3, map4, map5, mapError, named, run, sequence, succeed, timed, toResult, triggerDebugger, which, withDebug, withEnv, withFile, withIdlePriority, withMemoryLimitInBytes, withPrefix, withWarning)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Customs
@@ -160,7 +160,7 @@ derive description target inner =
                     Do.do
                         (if exists then
                             Do.do
-                                (Script.exec internalTools.diff.name [ "-r", tmpPath, targetPath ]
+                                (execUnlogged input_ internalTools.diff.name [ "-r", tmpPath, targetPath ]
                                     |> BackendTask.onError
                                         (\e ->
                                             Do.log ("Error inside " ++ description) <| \_ ->
@@ -181,7 +181,7 @@ derive description target inner =
                         )
                     <| \_ ->
                     Do.do
-                        (Script.exec "chmod" [ "-R", "a=rX", targetPath ]
+                        (execUnlogged input_ "chmod" [ "-R", "a=rX", targetPath ]
                             |> BackendTask.mapError InternalError
                         )
                     <| \_ ->
@@ -392,21 +392,22 @@ run :
     -> BuildTask tools e (Hash Normal)
     -> BackendTask (Error e) { output : Path, intermediate : List Path, warnings : Set String }
 run config buildPath m =
+    Do.do
+        (Script.makeDirectory { recursive = True } (Path.toString buildPath)
+            |> BackendTask.mapError InternalError
+        )
+    <| \_ ->
     Do.do (listExisting buildPath |> BackendTask.mapError InternalError) <| \existing ->
     Do.do
         (case config.jobs of
             Nothing ->
-                BackendTask.mapError InternalError nproc
+                BackendTask.mapError InternalError (nproc { memoryLimit = Nothing, prefix = [], env = Dict.empty, idlePriority = False, debug = config.debug })
 
             Just j ->
                 BackendTask.succeed j
         )
     <| \jobs_ ->
-    Do.do
-        (getInternalTools { buildPath = buildPath }
-            |> BackendTask.mapError InternalError
-        )
-    <| \internalTools ->
+    Do.do (getInternalTools |> BackendTask.mapError InternalError) <| \internalTools ->
     let
         input_ : t -> Input t
         input_ tools =
@@ -437,8 +438,8 @@ run config buildPath m =
         |> BackendTask.succeed
 
 
-getInternalTools : { input | buildPath : Path } -> BackendTask FatalError InternalTools
-getInternalTools { buildPath } =
+getInternalTools : BackendTask FatalError InternalTools
+getInternalTools =
     BackendTask.map4 InternalTools
         (which_ "b3sum")
         (which_ "chmod")
@@ -526,8 +527,16 @@ jobs =
     BuildTask "jobs" (\input_ deps -> BackendTask.succeed ( input_.jobs, deps ))
 
 
-nproc : BackendTask FatalError Int
-nproc =
+nproc :
+    { input
+        | memoryLimit : Maybe Int
+        , prefix : List String
+        , env : Dict String String
+        , idlePriority : Bool
+        , debug : Bool
+    }
+    -> BackendTask FatalError Int
+nproc input_ =
     let
         tryRunningOrElse :
             String
@@ -535,7 +544,7 @@ nproc =
             -> (() -> BackendTask FatalError Int)
             -> BackendTask FatalError Int
         tryRunningOrElse cmd args orElse =
-            Do.do (Script.command cmd args |> BackendTask.toResult) <| \nprocResult ->
+            Do.do (commandUnlogged input_ cmd args |> BackendTask.toResult) <| \nprocResult ->
             case nprocResult of
                 Ok output ->
                     let
@@ -755,7 +764,7 @@ commandLog :
         , prefix : List String
         , env : Dict String String
         , idlePriority : Bool
-        , buildPath : Path
+        , debug : Bool
     }
     -> String
     -> List String
@@ -764,7 +773,26 @@ commandLog input_ cmd args =
     wrapCommand input_ CommandOptions.default cmd args
         |> Stream.read
         |> BackendTask.map .body
-        |> logCommand input_ cmd args
+        |> logCommand LogAlways input_ cmd args
+
+
+{-| -}
+commandUnlogged :
+    { input
+        | memoryLimit : Maybe Int
+        , prefix : List String
+        , env : Dict String String
+        , idlePriority : Bool
+        , debug : Bool
+    }
+    -> String
+    -> List String
+    -> BackendTask { fatal : FatalError, recoverable : Stream.Error Int String } String
+commandUnlogged input_ cmd args =
+    wrapCommand input_ CommandOptions.default cmd args
+        |> Stream.read
+        |> BackendTask.map .body
+        |> logCommand LogIfDebug input_ cmd args
 
 
 {-| -}
@@ -774,7 +802,7 @@ commandLogWith :
         , prefix : List String
         , env : Dict String String
         , idlePriority : Bool
-        , buildPath : Path
+        , debug : Bool
     }
     -> CommandOptions
     -> String
@@ -784,7 +812,7 @@ commandLogWith input_ options cmd args =
     wrapCommand input_ options cmd args
         |> Stream.read
         |> BackendTask.map .body
-        |> logCommand input_ cmd args
+        |> logCommand LogAlways input_ cmd args
 
 
 {-| -}
@@ -792,14 +820,20 @@ execLog : Input tools -> String -> List String -> BackendTask FatalError ()
 execLog input_ cmd args =
     wrapCommand input_ CommandOptions.default cmd args
         |> Stream.run
-        |> logCommand input_ cmd args
+        |> logCommand LogAlways input_ cmd args
+
+
+execUnlogged : Input tools -> String -> List String -> BackendTask FatalError ()
+execUnlogged input_ cmd args =
+    wrapCommand input_ CommandOptions.default cmd args
+        |> Stream.run
+        |> logCommand LogIfDebug input_ cmd args
 
 
 wrapCommand :
     { input
         | memoryLimit : Maybe Int
         , idlePriority : Bool
-        , buildPath : Path
     }
     -> CommandOptions
     -> String
@@ -896,9 +930,14 @@ wrapCommand input_ options cmd args =
             |> Stream.commandWithOptions streamOptions "systemd-run"
 
 
+type WhenToLog
+    = LogAlways
+    | LogIfDebug
+
+
 {-| -}
-logCommand : { a | prefix : List String, env : Dict String String } -> String -> List String -> BackendTask error b -> BackendTask error b
-logCommand { prefix, env } cmd args task =
+logCommand : WhenToLog -> { a | prefix : List String, env : Dict String String, debug : Bool } -> String -> List String -> BackendTask error b -> BackendTask error b
+logCommand when { prefix, env, debug } cmd args task =
     let
         label : String -> String
         label i =
@@ -910,10 +949,22 @@ logCommand { prefix, env } cmd args task =
             )
                 |> List.Extra.removeWhen String.isEmpty
                 |> String.join " "
+
+        log =
+            case when of
+                LogAlways ->
+                    True
+
+                LogIfDebug ->
+                    debug
     in
-    BackendTask.Extra.timed
-        (label "Running")
-        (label "Ran")
+    if log then
+        BackendTask.Extra.timed
+            (label "Running")
+            (label "Ran")
+            task
+
+    else
         task
 
 

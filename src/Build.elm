@@ -33,11 +33,11 @@ type alias Config tools inputs =
     { getTools : BuildTask () FatalError tools
     , getInputs : BackendTask FatalError inputs
     , buildAction : inputs -> BuildTask tools FatalError FileOrDirectory
-    , buildDirectory : Path
+    , buildPath : Path
+    , debug : Bool
     , outputName : Path
     , removeStale : Bool
     , jobs : Maybe Int
-    , debug : Bool
     , check : Bool
     , keepFailed : Bool
     , hashKind : HashKind
@@ -63,12 +63,13 @@ programConfig =
     Program.config
         |> Program.add
             (OptionsParser.build
-                (\inputDirectory buildPath ->
+                (\inputDirectory buildPath debug ->
                     Config
                         Buildfile.getTools
-                        (Buildfile.getInputs { inputDirectory = inputDirectory, buildPath = buildPath })
+                        (Buildfile.getInputs { inputDirectory = inputDirectory, buildPath = buildPath, debug = debug })
                         (Buildfile.buildAction { inputDirectory = inputDirectory, buildPath = buildPath })
                         buildPath
+                        debug
                 )
                 |> OptionsParser.with
                     (Option.requiredKeywordArg "input"
@@ -81,6 +82,10 @@ programConfig =
                         |> Option.map Path.path
                         |> Option.withDisplayName "dir"
                         |> Option.withDescription "Build directory - contains the intermediate files"
+                    )
+                |> OptionsParser.with
+                    (Option.flag "debug"
+                        |> Option.withDescription "Output debug info"
                     )
                 |> OptionsParser.with
                     (Option.requiredKeywordArg "output"
@@ -107,10 +112,6 @@ programConfig =
                             )
                     )
                 |> OptionsParser.with
-                    (Option.flag "debug"
-                        |> Option.withDescription "Output debug info"
-                    )
-                |> OptionsParser.with
                     (Option.flag "check"
                         |> Option.withDescription "Re-run all commands to check for determinism"
                     )
@@ -134,7 +135,6 @@ toTask config =
         Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Getting inputs") <| \_ ->
         Do.do config.getInputs <| \inputs ->
         Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Processing inputs") <| \_ ->
-        Do.do (Script.makeDirectory { recursive = True } (Path.toString config.buildDirectory)) <| \_ ->
         Do.do
             (BuildTask.run
                 { jobs = config.jobs
@@ -144,7 +144,7 @@ toTask config =
                 , keepFailed = config.keepFailed
                 , getTools = config.getTools
                 }
-                config.buildDirectory
+                config.buildPath
                 (config.buildAction inputs)
                 |> BackendTask.mapError buildErrorToFatalError
             )
@@ -163,7 +163,7 @@ toTask config =
             }
         <| \_ ->
         Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Output: " ++ Path.toString combined.output) <| \_ ->
-        Do.do (BackendTask.Customs.readdir config.buildDirectory) <| \actualList ->
+        Do.do (BackendTask.Customs.readdir config.buildPath) <| \actualList ->
         let
             expected : Set String
             expected =
@@ -174,7 +174,7 @@ toTask config =
             actual : Set String
             actual =
                 actualList
-                    |> List.map (\file -> Path.toString config.buildDirectory ++ "/" ++ file)
+                    |> List.map (\file -> Path.toString config.buildPath ++ "/" ++ file)
                     |> Set.fromList
 
             unexpected : Set String

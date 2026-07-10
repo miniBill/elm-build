@@ -242,7 +242,7 @@ downloadSHA256 config =
 
 {-| -}
 inputs :
-    { input | buildPath : Path }
+    { input | buildPath : Path, debug : Bool }
     -> List Path
     ->
         BackendTask
@@ -254,14 +254,14 @@ inputs :
             )
 inputs input_ inputPaths =
     -- TODO: copy the files inside the build path _before_ hashing
-    Do.do (Internal.getInternalTools input_) <| \internalTools ->
+    Do.do Internal.getInternalTools <| \internalTools ->
     Do.do
         (Internal.commandLog
             { memoryLimit = Nothing
             , prefix = []
             , env = Dict.empty
             , idlePriority = False
-            , buildPath = input_.buildPath
+            , debug = input_.debug
             }
             internalTools.b3sum.name
             (List.map Path.toString inputPaths)

@@ -47,7 +47,7 @@ type alias HashedFileWith a =
     }
 
 
-getInputs : { a | inputDirectory : Path, buildPath : Path } -> BackendTask FatalError (List ( Path, BuildTask Tools e FileOrDirectory ))
+getInputs : { a | inputDirectory : Path, buildPath : Path, debug : Bool } -> BackendTask FatalError (List ( Path, BuildTask Tools e FileOrDirectory ))
 getInputs config =
     Glob.fromStringWithOptions
         (let
