@@ -104,7 +104,7 @@ pipeThrough_ cmd args hash =
         (label "Piping")
         (label "Piped")
         (Stream.fileRead (Hash.toPath buildPath hash)
-            |> Stream.pipe (Stream.command (cmd.hash |> Hash.toPath buildPath) args)
+            |> Stream.pipe (Stream.command cmd.name args)
             |> Stream.pipe (Stream.fileWrite (Hash.toPathTemporary buildPath target))
             |> Stream.readMetadata
             |> BackendTask.mapError Internal.UserError
