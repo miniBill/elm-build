@@ -196,12 +196,12 @@ commandInWritableDirectoryWith options cmd args hash =
     Internal.derive (String.join " " ("commandInWritableDirectory" :: cmd.name :: args)) outputHash <| \({ internalTools, buildPath, debug } as input) target ->
     withWorkspace input (Hash.toWorkspace target) <| \workspacePath ->
     Do.do
-        (Script.exec (Hash.toPath buildPath internalTools.cp.hash) [ "-r", Hash.toPath buildPath hash, workspacePath ]
+        (Script.exec internalTools.cp.name [ "-r", Hash.toPath buildPath hash, workspacePath ]
             |> BackendTask.mapError Internal.InternalError
         )
     <| \_ ->
     Do.do
-        (Script.exec (Hash.toPath buildPath internalTools.chmod.hash) [ "-R", "u+w", workspacePath ]
+        (Script.exec internalTools.chmod.name [ "-R", "u+w", workspacePath ]
             |> BackendTask.mapError Internal.InternalError
         )
     <| \_ ->
@@ -367,12 +367,12 @@ patchFileInDirectory hash filename { description } patch =
     Internal.derive ("Patch " ++ filename ++ " with " ++ description) outputHash <| \({ internalTools, buildPath } as input) target ->
     withWorkspace input (Hash.toWorkspace target) <| \workspacePath ->
     Do.do
-        (Script.exec (Hash.toPath buildPath internalTools.cp.hash) [ "-r", Hash.toPath buildPath hash, workspacePath ]
+        (Internal.execUnlogged input internalTools.cp.name [ "-r", Hash.toPath buildPath hash, workspacePath ]
             |> BackendTask.mapError Internal.InternalError
         )
     <| \_ ->
     Do.do
-        (Script.exec (Hash.toPath buildPath internalTools.chmod.hash) [ "-R", "u+w", workspacePath ]
+        (Internal.execUnlogged input internalTools.chmod.name [ "-R", "u+w", workspacePath ]
             |> BackendTask.mapError Internal.InternalError
         )
     <| \_ ->
