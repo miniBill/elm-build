@@ -3,7 +3,7 @@ module BuildTask.Image exposing (getSize, getSvgSize, stripMetadata)
 import Ansi.Color
 import BackendTask.File as File
 import BackendTask.Stream as Stream
-import BuildTask exposing (BuildTask, FileOrDirectory)
+import BuildTask exposing (BuildTask, Command, FileOrDirectory)
 import BuildTask.Unsafe
 import FatalError exposing (FatalError)
 import Parser exposing ((|.), (|=), Parser)
@@ -11,12 +11,12 @@ import Parser.Error
 import Parser.Workaround
 
 
-getSvgSize : FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : File.FileReadError String } { width : Int, height : Int }
+getSvgSize : FileOrDirectory -> BuildTask tools { fatal : FatalError, recoverable : File.FileReadError String } { width : Int, height : Int }
 getSvgSize hash =
     BuildTask.withFile hash parseSvgSize
 
 
-parseSvgSize : String -> BuildTask { fatal : FatalError, recoverable : File.FileReadError String } { width : Int, height : Int }
+parseSvgSize : String -> BuildTask tools { fatal : FatalError, recoverable : File.FileReadError String } { width : Int, height : Int }
 parseSvgSize input =
     case Parser.run viewBoxParser input of
         Ok { width, height } ->
@@ -79,11 +79,11 @@ errorToString src deadEnds =
         |> String.concat
 
 
-stripMetadata : FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error () String } FileOrDirectory
+stripMetadata : FileOrDirectory -> BuildTask { tools | exiftool : Command } { fatal : FatalError, recoverable : Stream.Error () String } FileOrDirectory
 stripMetadata hash =
-    BuildTask.Unsafe.pipeThrough "exiftool" [ "-all=", "-", "-o", "-" ] hash
+    BuildTask.Unsafe.pipeThrough .exiftool [ "-all=", "-", "-o", "-" ] hash
 
 
-getSize : FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error () String } FileOrDirectory
+getSize : FileOrDirectory -> BuildTask { tools | identify : Command } { fatal : FatalError, recoverable : Stream.Error () String } FileOrDirectory
 getSize file =
-    BuildTask.Unsafe.pipeThrough "identify" [ "-ping", "-format", "%w %h", "-" ] file
+    BuildTask.Unsafe.pipeThrough .identify [ "-ping", "-format", "%w %h", "-" ] file

@@ -79,10 +79,10 @@ weightToNumber weight =
             900
 
 
-parse : FileOrDirectory -> BuildTask { recoverable : FontError, fatal : FatalError } Data
+parse : FileOrDirectory -> BuildTask { a | fc_scan : BuildTask.Command } { recoverable : FontError, fatal : FatalError } Data
 parse hash =
     let
-        readFontData : String -> BuildTask { fatal : FatalError, recoverable : FontError } Data
+        readFontData : String -> BuildTask t { fatal : FatalError, recoverable : FontError } Data
         readFontData familyAndStyle =
             case String.split " || " familyAndStyle of
                 [ family, styleAndWeight ] ->
@@ -105,7 +105,7 @@ parse hash =
                         (FailedToParseFamilyAndStyle familyAndStyle)
                         |> BuildTask.fail
     in
-    BuildTask.doWithError (Unsafe.commandWithFile "fc-scan" [ "--format", "%{family[0]} || %{style[0]}" ] hash) FailedToRunFcScan <| \familyAndStyleFile ->
+    BuildTask.doWithError (Unsafe.commandWithFile .fc_scan [ "--format", "%{family[0]} || %{style[0]}" ] hash) FailedToRunFcScan <| \familyAndStyleFile ->
     BuildTask.doWithError (BuildTask.withFile familyAndStyleFile BuildTask.succeed) FailedToReadFile <| \familyAndStyle ->
     readFontData familyAndStyle
 

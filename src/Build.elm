@@ -29,9 +29,10 @@ type alias HashKind =
     Hash.Kind
 
 
-type alias Config inputs =
-    { getInputs : BackendTask FatalError inputs
-    , buildAction : inputs -> BuildTask FatalError FileOrDirectory
+type alias Config tools inputs =
+    { getTools : BuildTask () FatalError tools
+    , getInputs : BackendTask FatalError inputs
+    , buildAction : inputs -> BuildTask tools FatalError FileOrDirectory
     , buildDirectory : Path
     , outputName : Path
     , removeStale : Bool
@@ -57,15 +58,17 @@ secureHash =
     Hash.Secure
 
 
-programConfig : Program.Config (Config (List ( Path, BuildTask FatalError FileOrDirectory )))
+programConfig : Program.Config (Config Buildfile.Tools (List ( Path, BuildTask Buildfile.Tools FatalError FileOrDirectory )))
 programConfig =
     Program.config
         |> Program.add
             (OptionsParser.build
-                (\inputDirectory ->
+                (\inputDirectory buildPath ->
                     Config
-                        (Buildfile.getInputs { inputDirectory = inputDirectory })
-                        (Buildfile.buildAction { inputDirectory = inputDirectory })
+                        Buildfile.getTools
+                        (Buildfile.getInputs { inputDirectory = inputDirectory, buildPath = buildPath })
+                        (Buildfile.buildAction { inputDirectory = inputDirectory, buildPath = buildPath })
+                        buildPath
                 )
                 |> OptionsParser.with
                     (Option.requiredKeywordArg "input"
@@ -124,7 +127,7 @@ programConfig =
             )
 
 
-toTask : Config inputs -> BackendTask FatalError ()
+toTask : Config Buildfile.Tools inputs -> BackendTask FatalError ()
 toTask config =
     BackendTask.Extra.profiling "main" <|
         Do.do BackendTask.Time.now <| \begin ->
@@ -139,6 +142,7 @@ toTask config =
                 , check = config.check
                 , hashKind = config.hashKind
                 , keepFailed = config.keepFailed
+                , tools = config.getTools
                 }
                 config.buildDirectory
                 (config.buildAction inputs)

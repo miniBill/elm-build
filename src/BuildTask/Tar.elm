@@ -1,8 +1,8 @@
-module BuildTask.Tar exposing (extract, listContents)
+module BuildTask.Tar exposing (Tar, extract, listContents, which)
 
 import BackendTask
 import BackendTask.Do
-import BuildTask exposing (BuildTask, FileOrDirectory)
+import BuildTask exposing (BuildTask, Command, FileOrDirectory)
 import BuildTask.Internal as Internal
 import BuildTask.Unsafe
 import FatalError exposing (FatalError)
@@ -10,11 +10,24 @@ import Hash
 import Pages.Script as Script
 
 
+type Tar
+    = Tar Command
+
+
+which : BuildTask FatalError Tar
+which =
+    BuildTask.which "tar" |> BuildTask.map Tar
+
+
 {-| List the contents of a tar file
 -}
-listContents : FileOrDirectory -> BuildTask FatalError (List String)
-listContents tar =
-    BuildTask.do (BuildTask.Unsafe.pipeThrough "tar" [ "tf", "-" ] tar |> BuildTask.allowFatal) <| \contentsFile ->
+listContents : { tools | tar : Tar } -> FileOrDirectory -> BuildTask FatalError (List String)
+listContents tools tarFile =
+    let
+        (Tar tar) =
+            tools.tar
+    in
+    BuildTask.do (BuildTask.Unsafe.pipeThrough tar [ "tf", "-" ] tarFile |> BuildTask.allowFatal) <| \contentsFile ->
     BuildTask.withFile contentsFile (\raw -> BuildTask.succeed (String.split "\n" raw)) |> BuildTask.allowFatal
 
 

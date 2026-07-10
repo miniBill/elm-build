@@ -26,7 +26,7 @@ codegen :
             , warning : String
             }
     }
-    -> BuildTask { fatal : FatalError, recoverable : CodegenError } { filename : Path, hash : FileOrDirectory }
+    -> BuildTask { tools | elm_format : BuildTask.Command } { fatal : FatalError, recoverable : CodegenError } { filename : Path, hash : FileOrDirectory }
 codegen file =
     BuildTask.doWithError (BuildTask.writeFile file.contents) ErrorWritingUnformattedFile <| \hash ->
     BuildTask.doWithError (format hash) ErrorFormatting <| \formatted ->
@@ -56,6 +56,6 @@ formatWarning warning =
     "In declaration " ++ warning.declaration ++ ": " ++ warning.warning
 
 
-format : FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error () String } FileOrDirectory
+format : FileOrDirectory -> BuildTask { tools | elm_format : BuildTask.Command } { fatal : FatalError, recoverable : Stream.Error () String } FileOrDirectory
 format hash =
-    Unsafe.pipeThrough "elm-format" [ "--stdin" ] hash
+    Unsafe.pipeThrough .elm_format [ "--stdin" ] hash

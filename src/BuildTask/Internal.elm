@@ -1,4 +1,4 @@
-module BuildTask.Internal exposing (BuildTask(..), DownloadError(..), Error(..), Input, State, Warning, allowFatal, andThen, andThen2, combineBy, commandLog, commandLogWith, derive, downloadSHA256, execLog, extendHashWith, extractFromDirectory, fail, fatalToInternal, hashFromString, input, jobs, map, map2, map3, map4, map5, mapError, named, run, sequence, succeed, timed, toResult, triggerDebugger, withDebug, withEnv, withFile, withIdlePriority, withMemoryLimitInBytes, withPrefix, withWarning)
+module BuildTask.Internal exposing (BuildTask(..), DownloadError(..), Error(..), Input, State, Warning, allowFatal, andThen, andThen2, combineBy, commandLog, commandLogWith, derive, downloadSHA256, execLog, extendHashWith, extractFromDirectory, fail, fatalToInternal, getInternalTools, getTool, hashFromString, input, jobs, map, map2, map3, map4, map5, mapError, named, run, sequence, succeed, timed, toResult, triggerDebugger, which, withDebug, withEnv, withFile, withIdlePriority, withMemoryLimitInBytes, withPrefix, withWarning)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Customs
@@ -22,8 +22,8 @@ import Utils
 import XBytes
 
 
-type BuildTask e a
-    = BuildTask String (Input -> State -> BackendTask (Error e) ( a, State ))
+type BuildTask tools e a
+    = BuildTask String (Input tools -> State -> BackendTask (Error e) ( a, State ))
 
 
 type Error e
@@ -37,11 +37,17 @@ type alias State =
     }
 
 
+type alias Command =
+    { name : String
+    , hash : Hash Normal
+    }
+
+
 type alias Warning =
     String
 
 
-type alias Input =
+type alias Input tools =
     { existing : HashSet
     , prefix : List String
     , buildPath : Path
@@ -53,6 +59,16 @@ type alias Input =
     , hashKind : Hash.Kind
     , env : Dict String String
     , memoryLimit : Maybe Int
+    , internalTools : InternalTools
+    , tools : tools
+    }
+
+
+type alias InternalTools =
+    { b3sum : Command
+    , chmod : Command
+    , cp : Command
+    , diff : Command
     }
 
 
@@ -68,14 +84,14 @@ derive :
     String
     -> Hash Normal
     ->
-        (Input
+        (Input tools
          -> Hash Temporary
          -> BackendTask (Error e) ()
         )
-    -> BuildTask e (Hash Normal)
+    -> BuildTask tools e (Hash Normal)
 derive description target inner =
     BuildTask "derive"
-        (\({ existing, buildPath } as input_) state ->
+        (\({ internalTools, existing, buildPath } as input_) state ->
             let
                 newDeps : HashSet
                 newDeps =
@@ -144,7 +160,7 @@ derive description target inner =
                     Do.do
                         (if exists then
                             Do.do
-                                (Script.exec "diff" [ "-r", tmpPath, targetPath ]
+                                (Script.exec (Hash.toPath buildPath internalTools.diff.hash) [ "-r", tmpPath, targetPath ]
                                     |> BackendTask.onError
                                         (\e ->
                                             Do.log ("Error inside " ++ description) <| \_ ->
@@ -173,7 +189,7 @@ derive description target inner =
         )
 
 
-runMonad : BuildTask e a -> Input -> State -> BackendTask (Error e) ( a, State )
+runMonad : BuildTask tools e a -> Input tools -> State -> BackendTask (Error e) ( a, State )
 runMonad (BuildTask label m) input_ state =
     if input_.debug then
         Dict.foldl BackendTask.withEnv (m input_ state) input_.env
@@ -201,7 +217,7 @@ runMonad (BuildTask label m) input_ state =
 
 
 {-| -}
-map : (a -> b) -> BuildTask e a -> BuildTask e b
+map : (a -> b) -> BuildTask tools e a -> BuildTask tools e b
 map f m =
     BuildTask "map"
         (\input_ deps ->
@@ -216,9 +232,9 @@ map f m =
 {-| -}
 map2 :
     (a -> b -> c)
-    -> BuildTask e a
-    -> BuildTask e b
-    -> BuildTask e c
+    -> BuildTask tools e a
+    -> BuildTask tools e b
+    -> BuildTask tools e c
 map2 f a b =
     BuildTask "map2"
         (\input_ deps ->
@@ -252,10 +268,10 @@ combineOutputs ls =
 {-| -}
 map3 :
     (a -> b -> c -> d)
-    -> BuildTask e a
-    -> BuildTask e b
-    -> BuildTask e c
-    -> BuildTask e d
+    -> BuildTask tools e a
+    -> BuildTask tools e b
+    -> BuildTask tools e c
+    -> BuildTask tools e d
 map3 f a b c =
     BuildTask "map3"
         (\input_ deps ->
@@ -272,11 +288,11 @@ map3 f a b c =
 {-| -}
 map4 :
     (a -> b -> c -> d -> r)
-    -> BuildTask e a
-    -> BuildTask e b
-    -> BuildTask e c
-    -> BuildTask e d
-    -> BuildTask e r
+    -> BuildTask tools e a
+    -> BuildTask tools e b
+    -> BuildTask tools e c
+    -> BuildTask tools e d
+    -> BuildTask tools e r
 map4 f a b c d =
     BuildTask "map4"
         (\input_ deps ->
@@ -296,12 +312,12 @@ map4 f a b c d =
 {-| -}
 map5 :
     (a -> b -> c -> d -> f -> g)
-    -> BuildTask e a
-    -> BuildTask e b
-    -> BuildTask e c
-    -> BuildTask e d
-    -> BuildTask e f
-    -> BuildTask e g
+    -> BuildTask tools e a
+    -> BuildTask tools e b
+    -> BuildTask tools e c
+    -> BuildTask tools e d
+    -> BuildTask tools e f
+    -> BuildTask tools e g
 map5 f a b c d e =
     BuildTask "map5"
         (\input_ deps ->
@@ -320,7 +336,7 @@ map5 f a b c d e =
 
 
 {-| -}
-andThen : (a -> BuildTask e b) -> BuildTask e a -> BuildTask e b
+andThen : (a -> BuildTask tools e b) -> BuildTask tools e a -> BuildTask tools e b
 andThen f m =
     BuildTask "andThen"
         (\input_ deps ->
@@ -333,7 +349,7 @@ andThen f m =
 
 
 {-| -}
-andThen2 : (a -> b -> BuildTask e c) -> BuildTask e a -> BuildTask e b -> BuildTask e c
+andThen2 : (a -> b -> BuildTask tools e c) -> BuildTask tools e a -> BuildTask tools e b -> BuildTask tools e c
 andThen2 f l r =
     BuildTask "andThen2"
         (\input_ deps ->
@@ -350,8 +366,8 @@ andThen2 f l r =
 
 withFile :
     Hash Normal
-    -> (String -> BuildTask { fatal : FatalError, recoverable : File.FileReadError decoderError } a)
-    -> BuildTask { fatal : FatalError, recoverable : File.FileReadError decoderError } a
+    -> (String -> BuildTask tools { fatal : FatalError, recoverable : File.FileReadError decoderError } a)
+    -> BuildTask tools { fatal : FatalError, recoverable : File.FileReadError decoderError } a
 withFile hash f =
     BuildTask "withFile"
         (\({ buildPath } as input_) state ->
@@ -364,7 +380,17 @@ withFile hash f =
         )
 
 
-run : { jobs : Maybe Int, debug : Bool, check : Bool, hashKind : Hash.Kind, keepFailed : Bool } -> Path -> BuildTask e (Hash Normal) -> BackendTask (Error e) { output : Path, intermediate : List Path, warnings : Set String }
+run :
+    { jobs : Maybe Int
+    , debug : Bool
+    , check : Bool
+    , hashKind : Hash.Kind
+    , keepFailed : Bool
+    , tools : BuildTask () e tools
+    }
+    -> Path
+    -> BuildTask tools e (Hash Normal)
+    -> BackendTask (Error e) { output : Path, intermediate : List Path, warnings : Set String }
 run config buildPath m =
     Do.do (listExisting buildPath |> BackendTask.mapError InternalError) <| \existing ->
     Do.do
@@ -376,9 +402,14 @@ run config buildPath m =
                 BackendTask.succeed j
         )
     <| \jobs_ ->
+    Do.do
+        (getInternalTools { buildPath = buildPath }
+            |> BackendTask.mapError InternalError
+        )
+    <| \internalTools ->
     let
-        input_ : Input
-        input_ =
+        input_ : t -> Input t
+        input_ tools =
             { existing = existing
             , prefix = []
             , buildPath = buildPath
@@ -390,19 +421,47 @@ run config buildPath m =
             , env = Dict.empty
             , memoryLimit = Nothing
             , idlePriority = False
+            , tools = tools
+            , internalTools = internalTools
             }
     in
-    runMonad m input_ { deps = HashSet.empty, warnings = Set.empty }
-        |> BackendTask.map
-            (\( output, state ) ->
-                { output = Path.path (Hash.toPath buildPath output)
-                , intermediate =
-                    state.deps
-                        |> HashSet.toList
-                        |> List.map (\raw -> raw |> Hash.toPath buildPath |> Path.path)
-                , warnings = state.warnings
-                }
-            )
+    Do.do (runMonad config.tools (input_ ()) { deps = HashSet.empty, warnings = Set.empty }) <| \( tools, intermediate ) ->
+    Do.do (runMonad m (input_ tools) intermediate) <| \( output, state ) ->
+    { output = Path.path (Hash.toPath buildPath output)
+    , intermediate =
+        state.deps
+            |> HashSet.toList
+            |> List.map (\raw -> raw |> Hash.toPath buildPath |> Path.path)
+    , warnings = state.warnings
+    }
+        |> BackendTask.succeed
+
+
+getInternalTools : { input | buildPath : Path } -> BackendTask FatalError InternalTools
+getInternalTools { buildPath } =
+    -- TODO: copy the files inside the build path _before_ hashing
+    Do.do (Script.expectWhich "b3sum") <| \b3sumExternalPath ->
+    let
+        go : String -> BackendTask FatalError Command
+        go name =
+            Do.do (Script.expectWhich name) <| \path ->
+            Do.command b3sumExternalPath [ path ] <| \line ->
+            case Hash.fromChecksum line of
+                Ok hash ->
+                    Script.copyFile
+                        { from = path
+                        , to = Hash.toPath buildPath hash
+                        }
+                        |> BackendTask.map (\() -> { name = name, hash = hash })
+
+                Err e ->
+                    BackendTask.fail (FatalError.fromString e)
+    in
+    BackendTask.map4 InternalTools
+        (go "b3sum")
+        (go "chmod")
+        (go "cp")
+        (go "diff")
 
 
 listExisting : Path -> BackendTask FatalError HashSet
@@ -428,7 +487,7 @@ listExisting path =
             )
 
 
-combineBy : Int -> List (BuildTask e a) -> BuildTask e (List a)
+combineBy : Int -> List (BuildTask tools e a) -> BuildTask tools e (List a)
 combineBy n ops =
     BuildTask "combineBy"
         (\input_ deps ->
@@ -450,7 +509,7 @@ combineBy n ops =
         )
 
 
-sequence : List (BuildTask e a) -> BuildTask e (List a)
+sequence : List (BuildTask tools e a) -> BuildTask tools e (List a)
 sequence ops =
     BuildTask "sequence"
         (\input_ deps ->
@@ -470,17 +529,17 @@ sequence ops =
         )
 
 
-timed : String -> String -> BuildTask e a -> BuildTask e a
+timed : String -> String -> BuildTask tools e a -> BuildTask tools e a
 timed before after task =
     BuildTask "timed" (\input_ deps -> BackendTask.Extra.timed before after (runMonad task input_ deps))
 
 
-withPrefix : String -> BuildTask e a -> BuildTask e a
+withPrefix : String -> BuildTask tools e a -> BuildTask tools e a
 withPrefix newPrefix m =
     BuildTask "withPrefix" (\input_ deps -> runMonad m { input_ | prefix = newPrefix :: input_.prefix } deps)
 
 
-jobs : BuildTask e Int
+jobs : BuildTask tools e Int
 jobs =
     BuildTask "jobs" (\input_ deps -> BackendTask.succeed ( input_.jobs, deps ))
 
@@ -527,12 +586,12 @@ nproc =
     BackendTask.fail (FatalError.fromString message)
 
 
-succeed : a -> BuildTask e a
+succeed : a -> BuildTask tools e a
 succeed v =
     BuildTask "succeed" (\_ deps -> BackendTask.succeed ( v, deps ))
 
 
-fail : msg -> BuildTask msg a
+fail : e -> BuildTask tools e a
 fail msg =
     BuildTask "checkIfDebug" (\{ debug } deps -> BackendTask.succeed ( debug, deps ))
         |> andThen
@@ -557,7 +616,7 @@ fail msg =
             )
 
 
-withWarning : Warning -> BuildTask e a -> BuildTask e a
+withWarning : Warning -> BuildTask tools e a -> BuildTask tools e a
 withWarning warning ((BuildTask n _) as t) =
     BuildTask n
         (\input_ deps ->
@@ -573,7 +632,7 @@ withWarning warning ((BuildTask n _) as t) =
         )
 
 
-triggerDebugger : BuildTask e ()
+triggerDebugger : BuildTask tools e ()
 triggerDebugger =
     BuildTask "triggerDebugger"
         (\_ deps ->
@@ -583,12 +642,13 @@ triggerDebugger =
         )
 
 
-input : Path -> BuildTask FatalError (Hash Normal)
+input : Path -> BuildTask tools FatalError (Hash Normal)
 input inputPath =
+    -- TODO: Copy files before hashing them
     BuildTask "input"
         (\input_ deps ->
             Do.do
-                (commandLog input_ "b3sum" [ Path.toString inputPath ]
+                (commandLog input_ input_.internalTools.b3sum [ Path.toString inputPath ]
                     |> BackendTask.allowFatal
                     |> BackendTask.mapError UserError
                 )
@@ -608,6 +668,36 @@ input inputPath =
             )
 
 
+which : String -> BuildTask tools FatalError (Hash Normal)
+which command =
+    BuildTask "which"
+        (\input_ deps ->
+            Do.do
+                (Script.expectWhich command
+                    |> BackendTask.mapError UserError
+                )
+            <| \path ->
+            Do.do
+                (commandLog input_ input_.internalTools.b3sum [ path ]
+                    |> BackendTask.allowFatal
+                    |> BackendTask.mapError InternalError
+                )
+            <| \body ->
+            case Hash.fromChecksum body of
+                Err e ->
+                    BackendTask.fail (UserError (FatalError.fromString e))
+
+                Ok hash ->
+                    BackendTask.succeed ( ( path, hash ), deps )
+        )
+        |> andThen
+            (\( path, hash ) ->
+                derive "input" hash <| \{ buildPath } target ->
+                Script.copyFile { from = path, to = Hash.toPathTemporary buildPath target }
+                    |> BackendTask.mapError UserError
+            )
+
+
 type DownloadError
     = WrongHashLength String
     | InvalidHashHex String
@@ -615,7 +705,7 @@ type DownloadError
     | WrongHash { expected : String, actual : String }
 
 
-downloadSHA256 : { url : String, sha256 : String } -> BuildTask DownloadError (Hash Normal)
+downloadSHA256 : { url : String, sha256 : String } -> BuildTask { tools | sha256sum : Command } DownloadError (Hash Normal)
 downloadSHA256 { url, sha256 } =
     let
         hashLength : Int
@@ -631,7 +721,7 @@ downloadSHA256 { url, sha256 } =
                 fail (InvalidHashHex sha256)
 
             Just _ ->
-                derive "downloadSHA256" (Hash.build sha256) <| \({ buildPath } as input_) target ->
+                derive "downloadSHA256" (Hash.build sha256) <| \({ tools, buildPath } as input_) target ->
                 let
                     tmpPath : String
                     tmpPath =
@@ -652,7 +742,7 @@ downloadSHA256 { url, sha256 } =
                     )
                 <| \_ ->
                 Do.do
-                    (commandLog input_ "sha256sum" [ tmpPath ]
+                    (commandLog input_ tools.sha256sum [ tmpPath ]
                         |> BackendTask.allowFatal
                         |> BackendTask.mapError InternalError
                     )
@@ -673,13 +763,14 @@ downloadSHA256 { url, sha256 } =
 
 {-| -}
 commandLog :
-    { a
+    { input
         | memoryLimit : Maybe Int
         , prefix : List String
         , env : Dict String String
         , idlePriority : Bool
+        , buildPath : Path
     }
-    -> String
+    -> Command
     -> List String
     -> BackendTask { fatal : FatalError, recoverable : Stream.Error Int String } String
 commandLog input_ cmd args =
@@ -687,15 +778,35 @@ commandLog input_ cmd args =
 
 
 {-| -}
-commandLogWith :
-    { a
+commandLog_ :
+    { input
         | memoryLimit : Maybe Int
         , prefix : List String
         , env : Dict String String
         , idlePriority : Bool
+        , buildPath : Path
+    }
+    -> { name : String, path : String }
+    -> List String
+    -> BackendTask { fatal : FatalError, recoverable : Stream.Error Int String } String
+commandLog_ input_ cmd args =
+    wrapCommand_ input_ CommandOptions.default cmd args
+        |> Stream.read
+        |> BackendTask.map .body
+        |> logCommand input_ { name = cmd.name } args
+
+
+{-| -}
+commandLogWith :
+    { input
+        | memoryLimit : Maybe Int
+        , prefix : List String
+        , env : Dict String String
+        , idlePriority : Bool
+        , buildPath : Path
     }
     -> CommandOptions
-    -> String
+    -> Command
     -> List String
     -> BackendTask { fatal : FatalError, recoverable : Stream.Error Int String } String
 commandLogWith input_ options cmd args =
@@ -706,7 +817,7 @@ commandLogWith input_ options cmd args =
 
 
 {-| -}
-execLog : Input -> String -> List String -> BackendTask FatalError ()
+execLog : Input tools -> Command -> List String -> BackendTask FatalError ()
 execLog input_ cmd args =
     wrapCommand input_ CommandOptions.default cmd args
         |> Stream.run
@@ -714,15 +825,35 @@ execLog input_ cmd args =
 
 
 wrapCommand :
-    { a
+    { input
         | memoryLimit : Maybe Int
+        , buildPath : Path
         , idlePriority : Bool
     }
     -> CommandOptions
-    -> String
+    -> { b | hash : Hash Normal, name : String }
     -> List String
     -> Stream Int () { read : read, write : write }
 wrapCommand input_ options cmd args =
+    let
+        cmdPath : String
+        cmdPath =
+            Hash.toPath input_.buildPath cmd.hash
+    in
+    wrapCommand_ input_ options { name = cmd.name, path = cmdPath } args
+
+
+wrapCommand_ :
+    { input
+        | memoryLimit : Maybe Int
+        , idlePriority : Bool
+        , buildPath : Path
+    }
+    -> CommandOptions
+    -> { name : String, path : String }
+    -> List String
+    -> Stream Int () { read : read, write : write }
+wrapCommand_ input_ options cmd args =
     let
         memoryArg : String
         memoryArg =
@@ -770,13 +901,13 @@ wrapCommand input_ options cmd args =
     if String.isEmpty memoryArg && String.isEmpty cpuWeightArg then
         case timeout of
             Nothing ->
-                Stream.commandWithOptions streamOptions cmd args
+                Stream.commandWithOptions streamOptions cmd.path args
 
             Just duration ->
                 Stream.commandWithOptions streamOptions
                     "timeout"
                     (String.fromFloat (Duration.inSeconds duration)
-                        :: cmd
+                        :: cmd.path
                         :: args
                     )
 
@@ -799,13 +930,13 @@ wrapCommand input_ options cmd args =
                )
             ++ (case timeout of
                     Nothing ->
-                        [ "--", cmd ]
+                        [ "--", cmd.path ]
 
                     Just duration ->
                         [ "--"
                         , "timeout"
                         , String.fromFloat (Duration.inSeconds duration)
-                        , cmd
+                        , cmd.path
                         ]
                )
             ++ args
@@ -816,7 +947,7 @@ wrapCommand input_ options cmd args =
 
 
 {-| -}
-logCommand : { a | prefix : List String, env : Dict String String } -> String -> List String -> BackendTask error b -> BackendTask error b
+logCommand : { a | prefix : List String, env : Dict String String } -> { command | name : String } -> List String -> BackendTask error b -> BackendTask error b
 logCommand { prefix, env } cmd args task =
     let
         label : String -> String
@@ -824,7 +955,7 @@ logCommand { prefix, env } cmd args task =
             (prefix
                 ++ String.padLeft 7 ' ' i
                 :: Utils.viewEnv env
-                :: cmd
+                :: cmd.name
                 :: args
             )
                 |> List.Extra.removeWhen String.isEmpty
@@ -836,7 +967,7 @@ logCommand { prefix, env } cmd args task =
         task
 
 
-named : String -> (a -> { files : List (Hash Normal), additionalData : List String }) -> (a -> BuildTask e (Hash Normal)) -> a -> BuildTask e (Hash Normal)
+named : String -> (a -> { files : List (Hash Normal), additionalData : List String }) -> (a -> BuildTask tools e (Hash Normal)) -> a -> BuildTask tools e (Hash Normal)
 named name encode action param =
     let
         encoded : { files : List (Hash Normal), additionalData : List String }
@@ -881,12 +1012,12 @@ named name encode action param =
             )
 
 
-extendHashWith : List String -> Hash Normal -> BuildTask e (Hash Normal)
+extendHashWith : List String -> Hash Normal -> BuildTask tools e (Hash Normal)
 extendHashWith l r =
     hashFromString (String.join "|" (Hash.toString r :: l))
 
 
-hashFromString : String -> BuildTask e (Hash Normal)
+hashFromString : String -> BuildTask tools e (Hash Normal)
 hashFromString raw =
     BuildTask "fromString"
         (\{ hashKind } deps ->
@@ -894,7 +1025,7 @@ hashFromString raw =
         )
 
 
-toResult : BuildTask e a -> BuildTask x (Result e a)
+toResult : BuildTask tools e a -> BuildTask tools x (Result e a)
 toResult ((BuildTask name _) as f) =
     BuildTask name
         (\input_ deps ->
@@ -915,7 +1046,7 @@ toResult ((BuildTask name _) as f) =
         )
 
 
-withEnv : List ( String, String ) -> BuildTask e a -> BuildTask e a
+withEnv : List ( String, String ) -> BuildTask tools e a -> BuildTask tools e a
 withEnv env (BuildTask name f) =
     BuildTask name
         (\input_ state ->
@@ -923,7 +1054,7 @@ withEnv env (BuildTask name f) =
         )
 
 
-withMemoryLimitInBytes : Int -> BuildTask e a -> BuildTask e a
+withMemoryLimitInBytes : Int -> BuildTask tools e a -> BuildTask tools e a
 withMemoryLimitInBytes limit (BuildTask name f) =
     BuildTask name
         (\input_ state ->
@@ -931,7 +1062,7 @@ withMemoryLimitInBytes limit (BuildTask name f) =
         )
 
 
-withDebug : (String -> Never) -> BuildTask e a -> BuildTask e a
+withDebug : (String -> Never) -> BuildTask tools e a -> BuildTask tools e a
 withDebug _ (BuildTask name f) =
     BuildTask name
         (\input_ state ->
@@ -939,7 +1070,7 @@ withDebug _ (BuildTask name f) =
         )
 
 
-withIdlePriority : BuildTask e a -> BuildTask e a
+withIdlePriority : BuildTask tools e a -> BuildTask tools e a
 withIdlePriority (BuildTask name f) =
     BuildTask name
         (\input_ state ->
@@ -949,8 +1080,8 @@ withIdlePriority (BuildTask name f) =
 
 mapError :
     (e -> f)
-    -> BuildTask e a
-    -> BuildTask f a
+    -> BuildTask tools e a
+    -> BuildTask tools f a
 mapError f ((BuildTask name _) as t) =
     BuildTask name
         (\input_ state ->
@@ -967,7 +1098,7 @@ mapError f ((BuildTask name _) as t) =
         )
 
 
-allowFatal : BuildTask { e | fatal : FatalError } a -> BuildTask FatalError a
+allowFatal : BuildTask tools { e | fatal : FatalError } a -> BuildTask tools FatalError a
 allowFatal ((BuildTask name _) as t) =
     BuildTask name
         (\input_ state ->
@@ -984,7 +1115,7 @@ allowFatal ((BuildTask name _) as t) =
         )
 
 
-fatalToInternal : BuildTask FatalError a -> BuildTask e a
+fatalToInternal : BuildTask tools FatalError a -> BuildTask tools e a
 fatalToInternal ((BuildTask name _) as t) =
     BuildTask name
         (\input_ state ->
@@ -1001,7 +1132,7 @@ fatalToInternal ((BuildTask name _) as t) =
         )
 
 
-extractFromDirectory : Hash Normal -> String -> BuildTask { fatal : FatalError, recoverable : File.FileReadError e } (Hash Normal)
+extractFromDirectory : Hash Normal -> String -> BuildTask tools { fatal : FatalError, recoverable : File.FileReadError e } (Hash Normal)
 extractFromDirectory directory file =
     extendHashWith [ "extract", file ] directory
         |> andThen
@@ -1019,3 +1150,8 @@ extractFromDirectory directory file =
                                 }
                         )
             )
+
+
+getTool : (tools -> Command) -> BuildTask tools e Command
+getTool getter =
+    BuildTask "getTool" (\{ tools } state -> BackendTask.succeed ( getter tools, state ))
