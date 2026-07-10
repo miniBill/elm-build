@@ -160,7 +160,7 @@ derive description target inner =
                     Do.do
                         (if exists then
                             Do.do
-                                (Script.exec (Hash.toPath buildPath internalTools.diff.hash) [ "-r", tmpPath, targetPath ]
+                                (Script.exec internalTools.diff.name [ "-r", tmpPath, targetPath ]
                                     |> BackendTask.onError
                                         (\e ->
                                             Do.log ("Error inside " ++ description) <| \_ ->
@@ -386,7 +386,7 @@ run :
     , check : Bool
     , hashKind : Hash.Kind
     , keepFailed : Bool
-    , tools : BuildTask () e tools
+    , getTools : BuildTask () e tools
     }
     -> Path
     -> BuildTask tools e (Hash Normal)
@@ -425,7 +425,7 @@ run config buildPath m =
             , internalTools = internalTools
             }
     in
-    Do.do (runMonad config.tools (input_ ()) { deps = HashSet.empty, warnings = Set.empty }) <| \( tools, intermediate ) ->
+    Do.do (runMonad config.getTools (input_ ()) { deps = HashSet.empty, warnings = Set.empty }) <| \( tools, intermediate ) ->
     Do.do (runMonad m (input_ tools) intermediate) <| \( output, state ) ->
     { output = Path.path (Hash.toPath buildPath output)
     , intermediate =
@@ -439,29 +439,11 @@ run config buildPath m =
 
 getInternalTools : { input | buildPath : Path } -> BackendTask FatalError InternalTools
 getInternalTools { buildPath } =
-    -- TODO: copy the files inside the build path _before_ hashing
-    Do.do (Script.expectWhich "b3sum") <| \b3sumExternalPath ->
-    let
-        go : String -> BackendTask FatalError Command
-        go name =
-            Do.do (Script.expectWhich name) <| \path ->
-            Do.command b3sumExternalPath [ path ] <| \line ->
-            case Hash.fromChecksum line of
-                Ok hash ->
-                    Script.copyFile
-                        { from = path
-                        , to = Hash.toPath buildPath hash
-                        }
-                        |> BackendTask.map (\() -> { name = name, hash = hash })
-
-                Err e ->
-                    BackendTask.fail (FatalError.fromString e)
-    in
     BackendTask.map4 InternalTools
-        (go "b3sum")
-        (go "chmod")
-        (go "cp")
-        (go "diff")
+        (which_ "b3sum")
+        (which_ "chmod")
+        (which_ "cp")
+        (which_ "diff")
 
 
 listExisting : Path -> BackendTask FatalError HashSet
@@ -648,7 +630,7 @@ input inputPath =
     BuildTask "input"
         (\input_ deps ->
             Do.do
-                (commandLog input_ input_.internalTools.b3sum [ Path.toString inputPath ]
+                (commandLog input_ input_.internalTools.b3sum.name [ Path.toString inputPath ]
                     |> BackendTask.allowFatal
                     |> BackendTask.mapError UserError
                 )
@@ -668,7 +650,7 @@ input inputPath =
             )
 
 
-which : String -> BuildTask tools FatalError (Hash Normal)
+which : String -> BuildTask tools FatalError Command
 which command =
     BuildTask "which"
         (\input_ deps ->
@@ -678,24 +660,29 @@ which command =
                 )
             <| \path ->
             Do.do
-                (commandLog input_ input_.internalTools.b3sum [ path ]
-                    |> BackendTask.allowFatal
+                (Script.command "b3sum" [ path ]
                     |> BackendTask.mapError InternalError
                 )
-            <| \body ->
-            case Hash.fromChecksum body of
-                Err e ->
-                    BackendTask.fail (UserError (FatalError.fromString e))
-
+            <| \line ->
+            case Hash.fromChecksum line of
                 Ok hash ->
-                    BackendTask.succeed ( ( path, hash ), deps )
+                    BackendTask.succeed ( { name = command, hash = hash }, deps )
+
+                Err e ->
+                    BackendTask.fail (InternalError (FatalError.fromString e))
         )
-        |> andThen
-            (\( path, hash ) ->
-                derive "input" hash <| \{ buildPath } target ->
-                Script.copyFile { from = path, to = Hash.toPathTemporary buildPath target }
-                    |> BackendTask.mapError UserError
-            )
+
+
+which_ : String -> BackendTask FatalError Command
+which_ name =
+    Do.do (Script.expectWhich name) <| \path ->
+    Do.command "b3sum" [ path ] <| \line ->
+    case Hash.fromChecksum line of
+        Ok hash ->
+            BackendTask.succeed { name = name, hash = hash }
+
+        Err e ->
+            BackendTask.fail (FatalError.fromString e)
 
 
 type DownloadError
@@ -742,7 +729,7 @@ downloadSHA256 { url, sha256 } =
                     )
                 <| \_ ->
                 Do.do
-                    (commandLog input_ tools.sha256sum [ tmpPath ]
+                    (commandLog input_ tools.sha256sum.name [ tmpPath ]
                         |> BackendTask.allowFatal
                         |> BackendTask.mapError InternalError
                     )
@@ -770,30 +757,14 @@ commandLog :
         , idlePriority : Bool
         , buildPath : Path
     }
-    -> Command
+    -> String
     -> List String
     -> BackendTask { fatal : FatalError, recoverable : Stream.Error Int String } String
 commandLog input_ cmd args =
-    commandLogWith input_ CommandOptions.default cmd args
-
-
-{-| -}
-commandLog_ :
-    { input
-        | memoryLimit : Maybe Int
-        , prefix : List String
-        , env : Dict String String
-        , idlePriority : Bool
-        , buildPath : Path
-    }
-    -> { name : String, path : String }
-    -> List String
-    -> BackendTask { fatal : FatalError, recoverable : Stream.Error Int String } String
-commandLog_ input_ cmd args =
-    wrapCommand_ input_ CommandOptions.default cmd args
+    wrapCommand input_ CommandOptions.default cmd args
         |> Stream.read
         |> BackendTask.map .body
-        |> logCommand input_ { name = cmd.name } args
+        |> logCommand input_ cmd args
 
 
 {-| -}
@@ -806,7 +777,7 @@ commandLogWith :
         , buildPath : Path
     }
     -> CommandOptions
-    -> Command
+    -> String
     -> List String
     -> BackendTask { fatal : FatalError, recoverable : Stream.Error Int String } String
 commandLogWith input_ options cmd args =
@@ -817,7 +788,7 @@ commandLogWith input_ options cmd args =
 
 
 {-| -}
-execLog : Input tools -> Command -> List String -> BackendTask FatalError ()
+execLog : Input tools -> String -> List String -> BackendTask FatalError ()
 execLog input_ cmd args =
     wrapCommand input_ CommandOptions.default cmd args
         |> Stream.run
@@ -827,33 +798,14 @@ execLog input_ cmd args =
 wrapCommand :
     { input
         | memoryLimit : Maybe Int
-        , buildPath : Path
         , idlePriority : Bool
+        , buildPath : Path
     }
     -> CommandOptions
-    -> { b | hash : Hash Normal, name : String }
+    -> String
     -> List String
     -> Stream Int () { read : read, write : write }
 wrapCommand input_ options cmd args =
-    let
-        cmdPath : String
-        cmdPath =
-            Hash.toPath input_.buildPath cmd.hash
-    in
-    wrapCommand_ input_ options { name = cmd.name, path = cmdPath } args
-
-
-wrapCommand_ :
-    { input
-        | memoryLimit : Maybe Int
-        , idlePriority : Bool
-        , buildPath : Path
-    }
-    -> CommandOptions
-    -> { name : String, path : String }
-    -> List String
-    -> Stream Int () { read : read, write : write }
-wrapCommand_ input_ options cmd args =
     let
         memoryArg : String
         memoryArg =
@@ -901,13 +853,13 @@ wrapCommand_ input_ options cmd args =
     if String.isEmpty memoryArg && String.isEmpty cpuWeightArg then
         case timeout of
             Nothing ->
-                Stream.commandWithOptions streamOptions cmd.path args
+                Stream.commandWithOptions streamOptions cmd args
 
             Just duration ->
                 Stream.commandWithOptions streamOptions
                     "timeout"
                     (String.fromFloat (Duration.inSeconds duration)
-                        :: cmd.path
+                        :: cmd
                         :: args
                     )
 
@@ -930,24 +882,22 @@ wrapCommand_ input_ options cmd args =
                )
             ++ (case timeout of
                     Nothing ->
-                        [ "--", cmd.path ]
+                        [ "--", cmd ]
 
                     Just duration ->
                         [ "--"
                         , "timeout"
                         , String.fromFloat (Duration.inSeconds duration)
-                        , cmd.path
+                        , cmd
                         ]
                )
             ++ args
         )
-            |> Stream.commandWithOptions
-                streamOptions
-                "systemd-run"
+            |> Stream.commandWithOptions streamOptions "systemd-run"
 
 
 {-| -}
-logCommand : { a | prefix : List String, env : Dict String String } -> { command | name : String } -> List String -> BackendTask error b -> BackendTask error b
+logCommand : { a | prefix : List String, env : Dict String String } -> String -> List String -> BackendTask error b -> BackendTask error b
 logCommand { prefix, env } cmd args task =
     let
         label : String -> String
@@ -955,7 +905,7 @@ logCommand { prefix, env } cmd args task =
             (prefix
                 ++ String.padLeft 7 ' ' i
                 :: Utils.viewEnv env
-                :: cmd.name
+                :: cmd
                 :: args
             )
                 |> List.Extra.removeWhen String.isEmpty
@@ -1152,6 +1102,6 @@ extractFromDirectory directory file =
             )
 
 
-getTool : (tools -> Command) -> BuildTask tools e Command
+getTool : (tools -> command) -> BuildTask tools e command
 getTool getter =
     BuildTask "getTool" (\{ tools } state -> BackendTask.succeed ( getter tools, state ))

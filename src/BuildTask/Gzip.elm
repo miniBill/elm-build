@@ -1,4 +1,4 @@
-module BuildTask.Gzip exposing (Gzip, gunzip, gzip, which)
+module BuildTask.Gzip exposing (gunzip, gzip)
 
 import BackendTask.Stream as Stream
 import BuildTask exposing (Command, FileOrDirectory)
@@ -7,44 +7,27 @@ import BuildTask.Unsafe
 import FatalError exposing (FatalError)
 
 
-type Gzip
-    = Pigz Command
-
-
-which : BuildTask FatalError Gzip
-which =
-    BuildTask.which "pigz" |> BuildTask.map Pigz
-
-
 gzip :
-    { tools | gzip : Gzip }
-    -> FileOrDirectory
+    FileOrDirectory
     ->
         BuildTask
+            { tools | gzip : Command }
             { fatal : FatalError
             , recoverable : Stream.Error () String
             }
             FileOrDirectory
-gzip tools =
-    let
-        (Pigz pigz) =
-            tools.gzip
-    in
-    BuildTask.Unsafe.pipeThrough pigz [ "-9" ]
+gzip =
+    BuildTask.Unsafe.pipeThrough .gzip [ "-9" ]
 
 
 gunzip :
-    { tools | gzip : Gzip }
-    -> FileOrDirectory
+    FileOrDirectory
     ->
         BuildTask
+            { tools | gzip : Command }
             { fatal : FatalError
             , recoverable : Stream.Error () String
             }
             FileOrDirectory
-gunzip tools =
-    let
-        (Pigz pigz) =
-            tools.gzip
-    in
-    BuildTask.Unsafe.pipeThrough pigz [ "-d" ]
+gunzip =
+    BuildTask.Unsafe.pipeThrough .gzip [ "-d" ]

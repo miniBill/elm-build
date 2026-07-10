@@ -142,7 +142,7 @@ toTask config =
                 , check = config.check
                 , hashKind = config.hashKind
                 , keepFailed = config.keepFailed
-                , tools = config.getTools
+                , getTools = config.getTools
                 }
                 config.buildDirectory
                 (config.buildAction inputs)

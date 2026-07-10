@@ -135,7 +135,7 @@ commandInReadonlyDirectory cmd args hash =
     BuildTask.do (Internal.extendHashWith (Hash.toString cmd.hash :: args) hash) <| \outputHash ->
     Internal.derive (String.join " " ("commandInReadonlyDirectory" :: cmd.name :: args)) outputHash <| \({ buildPath } as input) target ->
     Do.do
-        (Internal.commandLog input cmd args
+        (Internal.commandLog input cmd.name args
             |> BackendTask.inDir (Hash.toPath buildPath hash)
             |> BackendTask.mapError Internal.UserError
         )
@@ -214,7 +214,7 @@ commandInWritableDirectoryWith options cmd args hash =
         )
     <| \() ->
     Do.do
-        (Internal.commandLogWith input options cmd args
+        (Internal.commandLogWith input options cmd.name args
             |> BackendTask.inDir workspacePath
             |> BackendTask.mapError Internal.UserError
         )
@@ -244,7 +244,7 @@ In particular, the command must not:
   - use any other source of randomness.
 
 -}
-commandInWritableDirectoryOutput : Command -> List String -> FileOrDirectory -> BuildTask tools { fatal : FatalError, recoverable : Stream.Error Int String } String
+commandInWritableDirectoryOutput : (tools -> Command) -> List String -> FileOrDirectory -> BuildTask tools { fatal : FatalError, recoverable : Stream.Error Int String } String
 commandInWritableDirectoryOutput cmd args hash =
     commandInWritableDirectoryOutputWith CommandOptions.default cmd args hash
 
@@ -269,8 +269,14 @@ In particular, the command must not:
   - use any other source of randomness.
 
 -}
-commandInWritableDirectoryOutputWith : CommandOptions -> Command -> List String -> FileOrDirectory -> BuildTask tools { fatal : FatalError, recoverable : Stream.Error Int String } String
-commandInWritableDirectoryOutputWith options cmd args hash =
+commandInWritableDirectoryOutputWith : CommandOptions -> (tools -> Command) -> List String -> FileOrDirectory -> BuildTask tools { fatal : FatalError, recoverable : Stream.Error Int String } String
+commandInWritableDirectoryOutputWith options toTool args hash =
+    BuildTask.do (BuildTask.getTool toTool) <| \tool ->
+    commandInWritableDirectoryOutputWith_ options tool args hash
+
+
+commandInWritableDirectoryOutputWith_ : CommandOptions -> Command -> List String -> FileOrDirectory -> BuildTask tools { fatal : FatalError, recoverable : Stream.Error Int String } String
+commandInWritableDirectoryOutputWith_ options cmd args hash =
     BuildTask.do
         (commandInWritableDirectoryWith options cmd args hash)
     <| \target ->
@@ -311,7 +317,7 @@ commandWithFile_ cmd args hash =
     BuildTask.do (Internal.extendHashWith (Hash.toString cmd.hash :: args) hash) <| \outputHash ->
     Internal.derive (String.join " " ("commandWithFile" :: cmd.name :: args)) outputHash <| \({ buildPath } as input) target ->
     Do.do
-        (Internal.commandLog input cmd (args ++ [ Hash.toPath buildPath hash ])
+        (Internal.commandLog input cmd.name (args ++ [ Hash.toPath buildPath hash ])
             |> BackendTask.mapError Internal.UserError
         )
     <| \output ->
@@ -382,7 +388,7 @@ patchFileInDirectory hash filename { description } patch =
                     |> BackendTask.mapError Internal.InternalError
             )
         |> BackendTask.and
-            (Internal.execLog input internalTools.cp [ "-rl", workspacePath, Hash.toPathTemporary buildPath target ]
+            (Internal.execLog input internalTools.cp.name [ "-rl", workspacePath, Hash.toPathTemporary buildPath target ]
                 |> BackendTask.mapError Internal.InternalError
             )
 

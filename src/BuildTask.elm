@@ -263,7 +263,7 @@ inputs input_ inputPaths =
             , idlePriority = False
             , buildPath = input_.buildPath
             }
-            internalTools.b3sum
+            internalTools.b3sum.name
             (List.map Path.toString inputPaths)
             |> BackendTask.allowFatal
         )
@@ -390,7 +390,7 @@ combineTree (Tree tree) =
         )
     <| \_ ->
     combined
-        |> Dict.foldl (\outputFilename hash acc -> Internal.execLog input_ internalTools.cp [ "-rl", Hash.toPath buildPath hash, Hash.toPathTemporary buildPath target ++ "/" ++ outputFilename ] :: acc) []
+        |> Dict.foldl (\outputFilename hash acc -> Internal.execLog input_ internalTools.cp.name [ "-rl", Hash.toPath buildPath hash, Hash.toPathTemporary buildPath target ++ "/" ++ outputFilename ] :: acc) []
         |> BackendTask.Extra.combineBy_ parallelism
         |> BackendTask.mapError Internal.InternalError
 
@@ -447,7 +447,7 @@ run :
     , check : Bool
     , hashKind : Hash.Kind
     , keepFailed : Bool
-    , tools : BuildTask () e tools
+    , getTools : BuildTask () e tools
     }
     -> Path
     -> BuildTask tools e FileOrDirectory
@@ -576,9 +576,8 @@ withIdlePriority task =
 which : String -> BuildTask tools FatalError Command
 which name =
     Internal.which name
-        |> map (\hash -> { name = name, hash = hash })
 
 
-getTool : (tools -> Command) -> BuildTask tools e Command
+getTool : (tools -> command) -> BuildTask tools e command
 getTool f =
     Internal.getTool f
