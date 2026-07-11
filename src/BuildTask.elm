@@ -8,7 +8,7 @@ module BuildTask exposing
     , withPrefix, timed
     , Warning, withWarning, withWarnings
     , jobs, triggerDebugger, fromResult
-    , withEnv, withMemoryLimitInGB, withDebug, withIdlePriority
+    , withEnv, withMemoryLimitInMB, withMemoryLimitInGB, withDebug, withIdlePriority
     , getTool, which
     )
 
@@ -62,7 +62,7 @@ module BuildTask exposing
 
 ## Advanced
 
-@docs withEnv, withMemoryLimitInGB, withDebug, withIdlePriority
+@docs withEnv, withMemoryLimitInMB, withMemoryLimitInGB, withDebug, withIdlePriority
 
 -}
 
@@ -561,6 +561,11 @@ readFromDirectory directory file =
 withMemoryLimitInGB : Int -> BuildTask tools e a -> BuildTask tools e a
 withMemoryLimitInGB limit task =
     Internal.withMemoryLimitInBytes (limit * 1024 * 1024 * 1024) task
+
+
+withMemoryLimitInMB : Int -> BuildTask tools e a -> BuildTask tools e a
+withMemoryLimitInMB limit task =
+    Internal.withMemoryLimitInBytes (limit * 1024 * 1024) task
 
 
 withDebug : (String -> Never) -> BuildTask tools e a -> BuildTask tools e a
