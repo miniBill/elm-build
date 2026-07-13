@@ -37,39 +37,31 @@ timed labelBefore labelAfter task =
 
                 inner : BackendTask error ( a, Int )
                 inner =
-                    Do.do BackendTask.Time.now <|
-                        \before ->
-                            Do.do task <|
-                                \res ->
-                                    Do.do BackendTask.Time.now <|
-                                        \after ->
-                                            let
-                                                delta : Int
-                                                delta =
-                                                    Time.posixToMillis after - Time.posixToMillis before
-                                            in
-                                            BackendTask.succeed ( res, delta )
+                    Do.do BackendTask.Time.now <| \before ->
+                    Do.do task <| \res ->
+                    Do.do BackendTask.Time.now <| \after ->
+                    let
+                        delta : Int
+                        delta =
+                            Time.posixToMillis after - Time.posixToMillis before
+                    in
+                    BackendTask.succeed ( res, delta )
             in
             Spinner.runTaskWithOptions options inner
                 |> BackendTask.map Tuple.first
 
         _ ->
-            Do.do BackendTask.Time.now <|
-                \before ->
-                    Do.log labelBefore <|
-                        \_ ->
-                            Do.do task <|
-                                \res ->
-                                    Do.do BackendTask.Time.now <|
-                                        \after ->
-                                            let
-                                                delta : Int
-                                                delta =
-                                                    Time.posixToMillis after - Time.posixToMillis before
-                                            in
-                                            Do.log (labelAfter ++ " in " ++ String.fromInt delta ++ "ms") <|
-                                                \_ ->
-                                                    BackendTask.succeed res
+            Do.do BackendTask.Time.now <| \before ->
+            Do.log labelBefore <| \_ ->
+            Do.do task <| \res ->
+            Do.do BackendTask.Time.now <| \after ->
+            let
+                delta : Int
+                delta =
+                    Time.posixToMillis after - Time.posixToMillis before
+            in
+            Do.log (labelAfter ++ " in " ++ String.fromInt delta ++ "ms") <| \_ ->
+            BackendTask.succeed res
 
 
 combineBy :
@@ -206,10 +198,7 @@ sequence_ inputs =
 
 profiling : String -> BackendTask FatalError a -> BackendTask FatalError a
 profiling label t =
-    Do.do (BackendTask.Customs.profile label) <|
-        \_ ->
-            Do.do t <|
-                \res ->
-                    Do.do (BackendTask.Customs.profileEnd label) <|
-                        \_ ->
-                            BackendTask.succeed res
+    Do.do (BackendTask.Customs.profile label) <| \_ ->
+    Do.do t <| \res ->
+    Do.do (BackendTask.Customs.profileEnd label) <| \_ ->
+    BackendTask.succeed res
