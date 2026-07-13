@@ -1,4 +1,4 @@
-module CommandOptions exposing (CommandOptions, allowNon0Status, default, toStreamCommandOptionsAndTimeout, toStringList, withOutput, withTimeout)
+module BuildTask.CommandOptions exposing (CommandOptions, allowNon0Status, default, toStreamCommandOptionsAndTimeout, toStringList, withOutput, withTimeout)
 
 import BackendTask.Stream as Stream
 import Duration exposing (Duration)

@@ -55,11 +55,6 @@ toString (Path d f) =
 
 relativeTo : Path -> Path -> Path
 relativeTo (Path rd _) (Path td tf) =
-    let
-        _ =
-            -- This is a horrible hack
-            Debug.todo
-    in
     Path (List.drop (List.length rd + 1) td) tf
 
 

@@ -11,7 +11,7 @@ import Path exposing (Path)
 run : Script
 run =
     Script.withCliOptions
-        (Build.programConfig
+        (Build.customProgramConfig
             (OptionsParser.build
                 (\inputPath config ->
                     { inputPath = inputPath
