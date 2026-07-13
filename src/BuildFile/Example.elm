@@ -2,7 +2,7 @@ module BuildFile.Example exposing (HashedFileWith, Inputs, Tools, buildFile, ima
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Glob as Glob
-import BuildFile exposing (BuildFile)
+import Build exposing (BuildFile)
 import BuildTask exposing (BuildTask, Command, FileOrDirectory)
 import BuildTask.Do as Do
 import BuildTask.Elm as Elm
@@ -31,10 +31,10 @@ import String.Extra
 import Utils
 
 
-buildFile : BuildFile Tools Inputs
+buildFile : BuildFile { inputPath : Path } Inputs Tools
 buildFile =
-    { getTools = getTools
-    , getInputs = getInputs
+    { getInputs = getInputs
+    , getTools = getTools
     , buildAction = buildAction
     }
 
@@ -69,7 +69,7 @@ type alias HashedFileWith a =
     }
 
 
-getInputs : { a | inputPath : Path, buildPath : Path, debug : Bool } -> BackendTask FatalError Inputs
+getInputs : { config | inputPath : Path, buildPath : Path, debug : Bool } -> BackendTask FatalError Inputs
 getInputs config =
     Glob.fromStringWithOptions
         (let
@@ -93,8 +93,8 @@ type T4 a b c d
     = T4 a b c d
 
 
-getTools : inputs -> BuildTask tools FatalError Tools
-getTools _ =
+getTools : Build.Config { inputPath : Path } -> inputs -> BuildTask tools FatalError Tools
+getTools _ _ =
     BuildTask.succeed Tools
         |> BuildTask.andMap (BuildTask.which "elm-format")
         |> BuildTask.andMap (BuildTask.which "exiftool")
@@ -103,7 +103,7 @@ getTools _ =
         |> BuildTask.andMap (BuildTask.which "magick")
 
 
-buildAction : { config | inputPath : Path } -> Inputs -> BuildTask Tools FatalError FileOrDirectory
+buildAction : Build.Config { inputPath : Path } -> Inputs -> BuildTask Tools FatalError FileOrDirectory
 buildAction config inputs =
     let
         inputSize : Int
@@ -116,46 +116,43 @@ buildAction config inputs =
             |> BuildTask.combine
             |> BuildTask.map Maybe.Extra.values
         )
-    <|
-        \processedFiles ->
-            let
-                fontFiles : List (HashedFileWith Font.Data)
-                fontFiles =
-                    List.filterMap asFont processedFiles
+    <| \processedFiles ->
+    let
+        fontFiles : List (HashedFileWith Font.Data)
+        fontFiles =
+            List.filterMap asFont processedFiles
 
-                imageFiles :
-                    List
-                        { original : HashedFileWith { width : Int, height : Int }
-                        , converted : List (HashedFileWith { width : Int })
-                        }
-                imageFiles =
-                    List.filterMap asImage processedFiles
+        imageFiles :
+            List
+                { original : HashedFileWith { width : Int, height : Int }
+                , converted : List (HashedFileWith { width : Int })
+                }
+        imageFiles =
+            List.filterMap asImage processedFiles
 
-                publicFolder : BuildTask Tools { fatal : FatalError, recoverable : Script.Error } FileOrDirectory
-                publicFolder =
-                    Do.writeFile (Font.toCssFile fontFiles) <|
-                        \fontsCssHash ->
-                            ({ filename = Path.path "fonts.css"
-                             , hash = fontsCssHash
-                             }
-                                :: List.concatMap processedFileToFileList processedFiles
-                            )
-                                |> BuildTask.combineInto
-                                |> BuildTask.withPrefix ("[" ++ String.fromInt inputSize ++ "/" ++ String.fromInt inputSize ++ "]")
-            in
-            Do.map4 T4
-                (imagesElmFile processedFiles)
-                (Elm.codegen (fontsElmFile fontFiles) |> BuildTask.allowFatal)
-                (imagesSizesFile imageFiles)
-                (publicFolder |> BuildTask.allowFatal)
-            <|
-                \(T4 imagesElm fontsElm imageSizes public) ->
-                    BuildTask.combineInto
-                        [ { filename = Path.path "generated/Images.elm", hash = imagesElm }
-                        , fontsElm
-                        , { filename = Path.path "image-sizes", hash = imageSizes }
-                        , { filename = Path.path "public", hash = public }
-                        ]
+        publicFolder : BuildTask Tools { fatal : FatalError, recoverable : Script.Error } FileOrDirectory
+        publicFolder =
+            Do.writeFile (Font.toCssFile fontFiles) <| \fontsCssHash ->
+            ({ filename = Path.path "fonts.css"
+             , hash = fontsCssHash
+             }
+                :: List.concatMap processedFileToFileList processedFiles
+            )
+                |> BuildTask.combineInto
+                |> BuildTask.withPrefix ("[" ++ String.fromInt inputSize ++ "/" ++ String.fromInt inputSize ++ "]")
+    in
+    Do.map4 T4
+        (imagesElmFile processedFiles)
+        (Elm.codegen (fontsElmFile fontFiles) |> BuildTask.allowFatal)
+        (imagesSizesFile imageFiles)
+        (publicFolder |> BuildTask.allowFatal)
+    <| \(T4 imagesElm fontsElm imageSizes public) ->
+    BuildTask.combineInto
+        [ { filename = Path.path "generated/Images.elm", hash = imagesElm }
+        , fontsElm
+        , { filename = Path.path "image-sizes", hash = imageSizes }
+        , { filename = Path.path "public", hash = public }
+        ]
 
 
 asImage :
@@ -284,9 +281,8 @@ imagesElmFile list =
                             |> (::) (toPicture.declaration |> Elm.expose)
                             |> Elm.file [ "Images" ]
                 in
-                Do.allowFatal (BuildTask.writeFile file.contents) <|
-                    \hash ->
-                        BuildTask.allowFatal (Elm.format hash)
+                Do.allowFatal (BuildTask.writeFile file.contents) <| \hash ->
+                BuildTask.allowFatal (Elm.format hash)
             )
 
 
@@ -356,45 +352,39 @@ processFile config total index ( path, copyFile ) =
 
         doImage : () -> BuildTask Tools FatalError (Maybe ProcessedFile)
         doImage () =
-            BuildTask.do copyFile <|
-                \hash ->
-                    BuildTask.do (image relative hash) <|
-                        \data ->
-                            data
-                                |> ProcessedImage
-                                |> Just
-                                |> BuildTask.succeed
+            BuildTask.do copyFile <| \hash ->
+            BuildTask.do (image relative hash) <| \data ->
+            data
+                |> ProcessedImage
+                |> Just
+                |> BuildTask.succeed
 
         doSvg : () -> BuildTask Tools FatalError (Maybe ProcessedFile)
         doSvg () =
-            BuildTask.do copyFile <|
-                \hash ->
-                    Do.allowFatal (Image.getSvgSize hash) <|
-                        \size ->
-                            { filename = relative
-                            , hash = hash
-                            , width = size.width
-                            , height = size.height
-                            }
-                                |> ProcessedSvg
-                                |> Just
-                                |> BuildTask.succeed
+            BuildTask.do copyFile <| \hash ->
+            Do.allowFatal (Image.getSvgSize hash) <| \size ->
+            { filename = relative
+            , hash = hash
+            , width = size.width
+            , height = size.height
+            }
+                |> ProcessedSvg
+                |> Just
+                |> BuildTask.succeed
 
         doFont : () -> BuildTask Tools FatalError (Maybe ProcessedFile)
         doFont () =
-            BuildTask.do copyFile <|
-                \hash ->
-                    Do.allowFatal (Font.parse hash) <|
-                        \fontData ->
-                            { style = fontData.style
-                            , weight = fontData.weight
-                            , family = fontData.family
-                            , filename = relative
-                            , hash = hash
-                            }
-                                |> ProcessedFont
-                                |> Just
-                                |> BuildTask.succeed
+            BuildTask.do copyFile <| \hash ->
+            Do.allowFatal (Font.parse hash) <| \fontData ->
+            { style = fontData.style
+            , weight = fontData.weight
+            , family = fontData.family
+            , filename = relative
+            , hash = hash
+            }
+                |> ProcessedFont
+                |> Just
+                |> BuildTask.succeed
     in
     (case Path.extension path of
         Just "webp" ->
@@ -431,9 +421,8 @@ processFile config total index ( path, copyFile ) =
             BuildTask.succeed Nothing
 
         Just "css" ->
-            BuildTask.do copyFile <|
-                \hash ->
-                    BuildTask.succeed (Just (ProcessedCss { filename = relative, hash = hash }))
+            BuildTask.do copyFile <| \hash ->
+            BuildTask.succeed (Just (ProcessedCss { filename = relative, hash = hash }))
 
         _ ->
             -- Cache.fail ("Don't know how to process " ++ Path.toString path)
@@ -497,9 +486,8 @@ image relative copied =
                     -> { a | extension : String }
                     -> BuildTask Tools FatalError (List (HashedFileWith { width : Int }))
                 convertAndResize stripped sizeData { extension } =
-                    convertTo extension ( stripped, originalExtension ) <|
-                        \converted ->
-                            BuildTask.each sizeData.sizes (doResize converted sizeData extension)
+                    convertTo extension ( stripped, originalExtension ) <| \converted ->
+                    BuildTask.each sizeData.sizes (doResize converted sizeData extension)
 
                 doResize :
                     FileOrDirectory
@@ -534,25 +522,20 @@ image relative copied =
                                 }
                             )
             in
-            Do.allowFatal (Image.stripMetadata copied) <|
-                \stripped ->
-                    Do.allowFatal (Image.getSize stripped) <|
-                        \sizeFile ->
-                            Do.allowFatal (BuildTask.withFile sizeFile BuildTask.succeed) <|
-                                \sizeFileContent ->
-                                    BuildTask.do (parseSizeFile sizeFileContent) <|
-                                        \sizeData ->
-                                            Do.each standardFormats.list (convertAndResize stripped sizeData) <|
-                                                \converted ->
-                                                    BuildTask.succeed
-                                                        { original =
-                                                            { width = sizeData.width
-                                                            , height = sizeData.height
-                                                            , filename = relative
-                                                            , hash = stripped
-                                                            }
-                                                        , converted = List.concat converted
-                                                        }
+            Do.allowFatal (Image.stripMetadata copied) <| \stripped ->
+            Do.allowFatal (Image.getSize stripped) <| \sizeFile ->
+            Do.allowFatal (BuildTask.withFile sizeFile BuildTask.succeed) <| \sizeFileContent ->
+            BuildTask.do (parseSizeFile sizeFileContent) <| \sizeData ->
+            Do.each standardFormats.list (convertAndResize stripped sizeData) <| \converted ->
+            BuildTask.succeed
+                { original =
+                    { width = sizeData.width
+                    , height = sizeData.height
+                    , filename = relative
+                    , hash = stripped
+                    }
+                , converted = List.concat converted
+                }
 
 
 minSize : number
@@ -581,28 +564,27 @@ getSizes width =
 
 getSizes_ : Elm.Declare.Function (Elm.Expression -> Elm.Expression)
 getSizes_ =
-    Elm.Declare.fn "getSizes" (Elm.Arg.varWith "width" Elm.Annotation.int) <|
-        \width ->
-            Elm.Let.letIn identity
-                |> Elm.Let.fn2 "go"
-                    (Elm.Arg.varWith "factor" Elm.Annotation.int)
-                    (Elm.Arg.varWith "acc" (Elm.Annotation.list Elm.Annotation.int))
-                    (\factor acc ->
-                        Elm.Let.letIn identity
-                            |> Elm.Let.value "w" (Elm.Op.intDivide width factor)
-                            |> Elm.Let.withBody
-                                (\w ->
-                                    Elm.ifThen (Elm.Op.gte w (Elm.int minSize))
-                                        (Elm.apply (Elm.val "go") [ Elm.Op.multiply factor (Elm.int 2), Elm.Op.cons w acc ])
-                                        (Gen.List.call_.reverse acc)
-                                )
-                            |> Elm.withType (Elm.Annotation.list Elm.Annotation.int)
-                    )
-                |> Elm.Let.withBody
-                    (\go ->
-                        go (Elm.int 1) (Elm.list [])
-                            |> Elm.withType (Elm.Annotation.list Elm.Annotation.int)
-                    )
+    Elm.Declare.fn "getSizes" (Elm.Arg.varWith "width" Elm.Annotation.int) <| \width ->
+    Elm.Let.letIn identity
+        |> Elm.Let.fn2 "go"
+            (Elm.Arg.varWith "factor" Elm.Annotation.int)
+            (Elm.Arg.varWith "acc" (Elm.Annotation.list Elm.Annotation.int))
+            (\factor acc ->
+                Elm.Let.letIn identity
+                    |> Elm.Let.value "w" (Elm.Op.intDivide width factor)
+                    |> Elm.Let.withBody
+                        (\w ->
+                            Elm.ifThen (Elm.Op.gte w (Elm.int minSize))
+                                (Elm.apply (Elm.val "go") [ Elm.Op.multiply factor (Elm.int 2), Elm.Op.cons w acc ])
+                                (Gen.List.call_.reverse acc)
+                        )
+                    |> Elm.withType (Elm.Annotation.list Elm.Annotation.int)
+            )
+        |> Elm.Let.withBody
+            (\go ->
+                go (Elm.int 1) (Elm.list [])
+                    |> Elm.withType (Elm.Annotation.list Elm.Annotation.int)
+            )
 
 
 convertTo :
@@ -781,28 +763,26 @@ toSources =
                 ]
             )
         )
-    <|
-        \base originalWidth config ->
-            getSizes_.call originalWidth
-                |> Gen.List.call_.map
-                    (Elm.fn (Elm.Arg.varWith "w" Elm.Annotation.int) <|
-                        \w ->
-                            Elm.record
-                                [ ( "url"
-                                  , Elm.Op.Extra.appendStrings
-                                        [ base
-                                        , Elm.string "-"
-                                        , Gen.String.call_.fromInt w
-                                        , Elm.string "."
-                                        , Elm.get "extension" config
-                                        ]
-                                  )
-                                , ( "width", Elm.maybe (Just w) )
-                                ]
-                    )
-                |> Gen.Html.Source.call_.fromImagesAndWidths
-                |> Gen.Html.Source.withType (Elm.get "format" config)
-                |> Elm.withType (Gen.Html.Source.annotation_.source Gen.Html.Source.annotation_.withWidths)
+    <| \base originalWidth config ->
+    getSizes_.call originalWidth
+        |> Gen.List.call_.map
+            (Elm.fn (Elm.Arg.varWith "w" Elm.Annotation.int) <| \w ->
+            Elm.record
+                [ ( "url"
+                  , Elm.Op.Extra.appendStrings
+                        [ base
+                        , Elm.string "-"
+                        , Gen.String.call_.fromInt w
+                        , Elm.string "."
+                        , Elm.get "extension" config
+                        ]
+                  )
+                , ( "width", Elm.maybe (Just w) )
+                ]
+            )
+        |> Gen.Html.Source.call_.fromImagesAndWidths
+        |> Gen.Html.Source.withType (Elm.get "format" config)
+        |> Elm.withType (Gen.Html.Source.annotation_.source Gen.Html.Source.annotation_.withWidths)
 
 
 toPicture : Elm.Declare.Function (Elm.Expression -> Elm.Expression -> Elm.Expression -> Elm.Expression -> Elm.Expression -> Elm.Expression)
@@ -815,28 +795,27 @@ toPicture =
         (Elm.Arg.varWith "originalExtension" Elm.Annotation.string)
         (Elm.Arg.varWith "originalWidth" Elm.Annotation.int)
         (Elm.Arg.varWith "originalHeight" Elm.Annotation.int)
-    <|
-        \attrs base originalExtension originalWidth originalHeight ->
-            Gen.Html.Picture.call_.picture
-                (Elm.Op.cons
-                    (Gen.Html.Attributes.call_.width originalWidth)
-                    (Elm.Op.cons
-                        (Gen.Html.Attributes.call_.height originalHeight)
-                        attrs
-                    )
-                )
-                (Elm.record
-                    [ ( "sources"
-                      , standardFormats.value
-                            |> Gen.List.call_.map
-                                (Elm.functionReduced "format" <|
-                                    toSources.call
-                                        base
-                                        originalWidth
-                                )
-                      )
-                    , ( "src", Elm.Op.append (Elm.Op.append base (Elm.string ".")) originalExtension )
-                    , ( "alt", Elm.maybe Nothing )
-                    ]
-                )
-                |> Elm.withType (Gen.Html.annotation_.html (Elm.Annotation.var "msg"))
+    <| \attrs base originalExtension originalWidth originalHeight ->
+    Gen.Html.Picture.call_.picture
+        (Elm.Op.cons
+            (Gen.Html.Attributes.call_.width originalWidth)
+            (Elm.Op.cons
+                (Gen.Html.Attributes.call_.height originalHeight)
+                attrs
+            )
+        )
+        (Elm.record
+            [ ( "sources"
+              , standardFormats.value
+                    |> Gen.List.call_.map
+                        (Elm.functionReduced "format" <|
+                            toSources.call
+                                base
+                                originalWidth
+                        )
+              )
+            , ( "src", Elm.Op.append (Elm.Op.append base (Elm.string ".")) originalExtension )
+            , ( "alt", Elm.maybe Nothing )
+            ]
+        )
+        |> Elm.withType (Gen.Html.annotation_.html (Elm.Annotation.var "msg"))
