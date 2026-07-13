@@ -1,8 +1,32 @@
-module Path exposing (Path, appendToFilename, directory, extension, filename, filenameWithoutExtension, path, relativeTo, replaceAll, replaceExtensionWith, toString)
+module Path exposing
+    ( Path, path
+    , directory, filename, filenameWithoutExtension, extension, toString
+    , relativeTo, appendToFilename, replaceAll, replaceExtensionWith
+    )
+
+{-| Module for handling paths. The implementation is Bad, you should probably not use this.
+
+
+## Building
+
+@docs Path, path
+
+
+## Query
+
+@docs directory, filename, filenameWithoutExtension, extension, toString
+
+
+## Transformations
+
+@docs relativeTo, appendToFilename, replaceAll, replaceExtensionWith
+
+-}
 
 import List.Extra
 
 
+{-| -}
 directory : Path -> Path
 directory (Path d _) =
     case List.reverse d of
@@ -13,11 +37,13 @@ directory (Path d _) =
             Path (List.reverse init) last
 
 
+{-| -}
 filename : Path -> String
 filename (Path _ f) =
     f
 
 
+{-| -}
 filenameWithoutExtension : Path -> String
 filenameWithoutExtension (Path _ f) =
     case String.split "." f |> List.reverse of
@@ -29,6 +55,7 @@ filenameWithoutExtension (Path _ f) =
             String.join "." (List.reverse names)
 
 
+{-| -}
 path : String -> Path
 path p =
     case
@@ -48,21 +75,27 @@ type Path
     = Path (List String) String
 
 
+{-| -}
 toString : Path -> String
 toString (Path d f) =
     String.join "/" (d ++ [ f ])
 
 
+{-| -}
 relativeTo : Path -> Path -> Path
 relativeTo (Path rd _) (Path td tf) =
     Path (List.drop (List.length rd + 1) td) tf
 
 
+{-| -}
 extension : Path -> Maybe String
 extension (Path _ f) =
-    f |> String.split "." |> List.Extra.last
+    f
+        |> String.split "."
+        |> List.Extra.last
 
 
+{-| -}
 replaceExtensionWith : String -> Path -> Path
 replaceExtensionWith newExtension (Path d f) =
     case String.split "." f |> List.reverse of
@@ -79,6 +112,7 @@ replaceExtensionWith newExtension (Path d f) =
             Path d (String.join "." newFilename)
 
 
+{-| -}
 appendToFilename : String -> Path -> Path
 appendToFilename toAppend (Path d f) =
     case String.split "." f |> List.reverse of
@@ -97,6 +131,7 @@ appendToFilename toAppend (Path d f) =
             Path d (f ++ toAppend)
 
 
+{-| -}
 replaceAll : String -> String -> Path -> Path
 replaceAll from to (Path d f) =
     Path (List.map (\s -> String.replace from to s) d) (String.replace from to f)

@@ -4,10 +4,15 @@
     "summary": "An Elm-based build system",
     "license": "BSD-3-Clause",
     "version": "1.0.0",
-    "exposed-modules": ["Build", "CommandOptions", "Path"],
+    "exposed-modules": [
+        "Build",
+        "Path",
+        "BuildTask.CommandOptions"
+    ],
     "elm-version": "0.19.0 <= v < 0.20.0",
     "dependencies": {
-        "elm/core": "1.0.0 <= v < 2.0.0"
+        "elm/core": "1.0.0 <= v < 2.0.0",
+        "elmcraft/core-extra": "2.3.0 <= v < 3.0.0"
     },
     "test-dependencies": {}
 }
