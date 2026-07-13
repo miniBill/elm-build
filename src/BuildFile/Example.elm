@@ -1,7 +1,8 @@
-module Buildfile exposing (HashedFileWith, Tools, buildAction, getInputs, getTools, image, standardFormats)
+module BuildFile.Example exposing (HashedFileWith, Tools, buildFile, image, standardFormats)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Glob as Glob
+import BuildFile exposing (BuildFile)
 import BuildTask exposing (BuildTask, Command, FileOrDirectory)
 import BuildTask.Do as Do
 import BuildTask.Elm as Elm
@@ -30,6 +31,27 @@ import String.Extra
 import Utils
 
 
+buildFile : BuildFile Tools Inputs
+buildFile =
+    { getTools = getTools
+    , getInputs = getInputs
+    , buildAction = buildAction
+    }
+
+
+type alias Tools =
+    { elm_format : Command
+    , exiftool : Command
+    , fc_scan : Command
+    , identify : Command
+    , magick : Command
+    }
+
+
+type alias Inputs =
+    List ( Path, BuildTask Tools FatalError FileOrDirectory )
+
+
 type ProcessedFile
     = ProcessedImage
         { original : HashedFileWith { width : Int, height : Int }
@@ -47,7 +69,7 @@ type alias HashedFileWith a =
     }
 
 
-getInputs : { a | inputDirectory : Path, buildPath : Path, debug : Bool } -> BackendTask FatalError (List ( Path, BuildTask Tools e FileOrDirectory ))
+getInputs : { a | inputPath : Path, buildPath : Path, debug : Bool } -> BackendTask FatalError Inputs
 getInputs config =
     Glob.fromStringWithOptions
         (let
@@ -57,7 +79,7 @@ getInputs config =
          in
          { defaultOptions | include = Glob.OnlyFiles }
         )
-        (Path.toString config.inputDirectory ++ "/**")
+        (Path.toString config.inputPath ++ "/**")
         |> BackendTask.andThen
             (\found ->
                 found
@@ -71,17 +93,8 @@ type T4 a b c d
     = T4 a b c d
 
 
-type alias Tools =
-    { elm_format : Command
-    , exiftool : Command
-    , fc_scan : Command
-    , identify : Command
-    , magick : Command
-    }
-
-
-getTools : BuildTask tools FatalError Tools
-getTools =
+getTools : inputs -> BuildTask tools FatalError Tools
+getTools _ =
     BuildTask.succeed Tools
         |> BuildTask.andMap (BuildTask.which "elm-format")
         |> BuildTask.andMap (BuildTask.which "exiftool")
@@ -90,7 +103,7 @@ getTools =
         |> BuildTask.andMap (BuildTask.which "magick")
 
 
-buildAction : { config | inputDirectory : Path } -> List ( Path, BuildTask Tools FatalError FileOrDirectory ) -> BuildTask Tools FatalError FileOrDirectory
+buildAction : { config | inputPath : Path } -> Inputs -> BuildTask Tools FatalError FileOrDirectory
 buildAction config inputs =
     let
         inputSize : Int
@@ -321,12 +334,12 @@ processedFileToFileList file =
             [ extract data ]
 
 
-processFile : { config | inputDirectory : Path } -> Int -> Int -> ( Path, BuildTask Tools FatalError FileOrDirectory ) -> BuildTask Tools FatalError (Maybe ProcessedFile)
+processFile : { config | inputPath : Path } -> Int -> Int -> ( Path, BuildTask Tools FatalError FileOrDirectory ) -> BuildTask Tools FatalError (Maybe ProcessedFile)
 processFile config total index ( path, copyFile ) =
     let
         relative : Path
         relative =
-            Path.relativeTo config.inputDirectory path
+            Path.relativeTo config.inputPath path
                 |> Path.replaceAll " " "_"
 
         prefix : String

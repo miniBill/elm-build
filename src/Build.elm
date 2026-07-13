@@ -1,4 +1,4 @@
-module Build exposing (Config, HashKind, fastHash, run, secureHash, toTask)
+module Build exposing (Config, HashKind, programConfig, toTask)
 
 import Ansi.Color
 import BackendTask exposing (BackendTask)
@@ -7,8 +7,8 @@ import BackendTask.Do as Do
 import BackendTask.Extra
 import BackendTask.File.Extra
 import BackendTask.Time
+import BuildFile exposing (BuildFile)
 import BuildTask exposing (BuildTask, FileOrDirectory)
-import Buildfile
 import Cli.Option as Option
 import Cli.OptionsParser as OptionsParser
 import Cli.Program as Program
@@ -20,27 +20,21 @@ import Path exposing (Path)
 import Time
 
 
-run : Script
-run =
-    Script.withCliOptions programConfig toTask
-
-
-type alias HashKind =
-    Hash.Kind
+type HashKind
+    = HashKind Hash.Kind
 
 
 type alias Config tools inputs =
-    { getTools : BuildTask () FatalError tools
-    , getInputs : BackendTask FatalError inputs
-    , buildAction : inputs -> BuildTask tools FatalError FileOrDirectory
+    { buildFile : BuildFile tools inputs
+    , inputPath : Path
     , buildPath : Path
-    , debug : Bool
     , outputName : Path
-    , removeStale : Bool
     , jobs : Maybe Int
+    , removeStale : Bool
     , check : Bool
     , keepFailed : Bool
     , hashKind : HashKind
+    , debug : Bool
     }
 
 
@@ -48,29 +42,21 @@ type alias Config tools inputs =
 -}
 fastHash : HashKind
 fastHash =
-    Hash.Fast
+    HashKind Hash.Fast
 
 
 {-| Use SHA256 for hashing. Suitable for a CI environment.
 -}
 secureHash : HashKind
 secureHash =
-    Hash.Secure
+    HashKind Hash.Secure
 
 
-programConfig : Program.Config (Config Buildfile.Tools (List ( Path, BuildTask Buildfile.Tools FatalError FileOrDirectory )))
-programConfig =
+programConfig : BuildFile tools inputs -> Program.Config (Config tools inputs)
+programConfig buildFile =
     Program.config
         |> Program.add
-            (OptionsParser.build
-                (\inputDirectory buildPath debug ->
-                    Config
-                        Buildfile.getTools
-                        (Buildfile.getInputs { inputDirectory = inputDirectory, buildPath = buildPath, debug = debug })
-                        (Buildfile.buildAction { inputDirectory = inputDirectory, buildPath = buildPath })
-                        buildPath
-                        debug
-                )
+            (OptionsParser.build (Config buildFile)
                 |> OptionsParser.with
                     (Option.requiredKeywordArg "input"
                         |> Option.map Path.path
@@ -84,18 +70,10 @@ programConfig =
                         |> Option.withDescription "Build directory - contains the intermediate files"
                     )
                 |> OptionsParser.with
-                    (Option.flag "debug"
-                        |> Option.withDescription "Output debug info"
-                    )
-                |> OptionsParser.with
                     (Option.requiredKeywordArg "output"
                         |> Option.map Path.path
                         |> Option.withDisplayName "dir"
                         |> Option.withDescription "Output directory"
-                    )
-                |> OptionsParser.with
-                    (Option.flag "remove-stale"
-                        |> Option.withDescription "Remove unused files from the build directory"
                     )
                 |> OptionsParser.with
                     (Option.optionalKeywordArg "jobs"
@@ -112,6 +90,10 @@ programConfig =
                             )
                     )
                 |> OptionsParser.with
+                    (Option.flag "remove-stale"
+                        |> Option.withDescription "Remove unused files from the build directory"
+                    )
+                |> OptionsParser.with
                     (Option.flag "check"
                         |> Option.withDescription "Re-run all commands to check for determinism"
                     )
@@ -123,29 +105,51 @@ programConfig =
                     (Option.optionalKeywordArg "hash-kind"
                         |> Option.withDescription "Kind of hash to use. Choose fast for FNV1a, secure for sha256."
                         |> Option.withDefault "fast"
-                        |> Option.oneOf [ ( "fast", Hash.Fast ), ( "secure", Hash.Secure ) ]
+                        |> Option.oneOf [ ( "fast", fastHash ), ( "secure", secureHash ) ]
+                    )
+                |> OptionsParser.with
+                    (Option.flag "debug"
+                        |> Option.withDescription "Output debug info"
                     )
             )
 
 
-toTask : Config Buildfile.Tools inputs -> BackendTask FatalError ()
+toTask : Config tools inputs -> BackendTask FatalError ()
 toTask config =
     BackendTask.Extra.profiling "main" <|
         Do.do BackendTask.Time.now <| \begin ->
         Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Getting inputs") <| \_ ->
-        Do.do config.getInputs <| \inputs ->
+        Do.do
+            (config.buildFile.getInputs
+                { inputPath = config.inputPath
+                , buildPath = config.buildPath
+                , debug = config.debug
+                }
+            )
+        <| \inputs ->
         Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Processing inputs") <| \_ ->
+        Do.exec "mkdir" [ "-p", Path.toString config.buildPath ] <| \_ ->
         Do.do
             (BuildTask.run
                 { jobs = config.jobs
                 , debug = config.debug
                 , check = config.check
-                , hashKind = config.hashKind
+                , hashKind =
+                    let
+                        (HashKind kind) =
+                            config.hashKind
+                    in
+                    kind
                 , keepFailed = config.keepFailed
-                , getTools = config.getTools
+                , getTools = config.buildFile.getTools inputs
                 }
                 config.buildPath
-                (config.buildAction inputs)
+                (config.buildFile.buildAction
+                    { inputPath = config.inputPath
+                    , buildPath = config.buildPath
+                    }
+                    inputs
+                )
                 |> BackendTask.mapError buildErrorToFatalError
             )
         <| \combined ->
@@ -154,7 +158,7 @@ toTask config =
                 |> BackendTask.onError (\_ -> BackendTask.succeed ())
             )
         <| \_ ->
-        symlink_
+        symlink
             { source = config.outputName
             , target =
                 Path.relativeTo
@@ -185,7 +189,11 @@ toTask config =
             Do.log ("Removing " ++ String.fromInt (Set.size unexpected) ++ " files from the build directory") <| \_ ->
             Do.do
                 (Set.toList unexpected
-                    |> List.map BackendTask.File.Extra.removeFileIfExists
+                    |> List.map
+                        (\i ->
+                            Do.exec "chmod" [ "-R", "700", i ] <| \_ ->
+                            Script.exec "rm" [ "-rf", i ]
+                        )
                     |> BackendTask.Extra.sequence_
                 )
             <| \_ ->
@@ -195,6 +203,7 @@ toTask config =
                 elapsed =
                     Time.posixToMillis end - Time.posixToMillis begin
 
+                msg : String
                 msg =
                     "Build done in "
                         ++ timeToString elapsed
@@ -249,11 +258,6 @@ timeToString ms =
         String.fromInt ms ++ "ms"
 
 
-symlink_ : { source : Path, target : Path } -> (() -> BackendTask FatalError a) -> BackendTask FatalError a
-symlink_ config k =
-    Do.do (symlink config) k
-
-
-symlink : { source : Path, target : Path } -> BackendTask FatalError ()
-symlink { source, target } =
-    Script.exec "ln" [ "-s", Path.toString target, Path.toString source ]
+symlink : { source : Path, target : Path } -> (() -> BackendTask FatalError a) -> BackendTask FatalError a
+symlink { source, target } k =
+    Do.do (Script.exec "ln" [ "-s", Path.toString target, Path.toString source ]) k
