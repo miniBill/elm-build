@@ -1,4 +1,4 @@
-module Build exposing (BuildFile, Config, HashKind, programConfig, toTask)
+module Build exposing (BuildFile, Config, HashKind, customProgramConfig, programConfig, toTask)
 
 import Ansi.Color
 import BackendTask exposing (BackendTask)
@@ -58,8 +58,13 @@ secureHash =
     HashKind Hash.Secure
 
 
-programConfig : OptionsParser.OptionsParser (Config {} -> Config customConfig) BuilderState.AnyOptions -> Program.Config (Config customConfig)
-programConfig optionsParser =
+programConfig : Program.Config (Config {})
+programConfig =
+    customProgramConfig (OptionsParser.build identity)
+
+
+customProgramConfig : OptionsParser.OptionsParser (Config {} -> Config customConfig) BuilderState.AnyOptions -> Program.Config (Config customConfig)
+customProgramConfig optionsParser =
     Program.config
         |> Program.add
             (optionsParser
