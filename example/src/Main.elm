@@ -1,7 +1,7 @@
-module Example exposing (run)
+module Main exposing (run)
 
 import Build
-import BuildFile.Example
+import Example
 import Cli.Option as Option
 import Cli.OptionsParser as OptionsParser exposing (OptionsParser)
 import Pages.Script as Script exposing (Script)
@@ -33,4 +33,4 @@ run =
                     )
             )
         )
-        (Build.toTask BuildFile.Example.buildFile)
+        (Build.toTask Example.buildFile)

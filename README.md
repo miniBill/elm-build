@@ -10,7 +10,7 @@ More specifically, you give it a `BuildTask FileOrDirectory` and it builds the f
 3. the standard building blocks (`succeed`/`mapN`/`andThen`);
 4. combining multiple `FileOrDirectory` in a new `FileOrDirectory`.
 
-An example of what the user would write is at https://github.com/miniBill/elm-build/blob/main/src/Buildfile.elm#L75
+An example of what the user would write is at https://github.com/miniBill/elm-build/blob/main/example/src/Example.elm
 
 This reads images and fonts, and generates `Images.elm` and `Fonts.elm` to reference them, while also converting the images to jpegxl/avif/webp and resizing them so they can be used in `srcset`s
 

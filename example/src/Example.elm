@@ -1,4 +1,4 @@
-module BuildFile.Example exposing (HashedFileWith, Inputs, Tools, buildFile, image, standardFormats)
+module Example exposing (HashedFileWith, Inputs, Tools, buildFile, image, standardFormats)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Glob as Glob
