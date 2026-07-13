@@ -1,4 +1,4 @@
-module BuildTask.Internal exposing (BuildTask(..), DownloadError(..), Error(..), Input, State, Warning, allowFatal, andThen, andThen2, combineBy, commandLog, commandLogWith, derive, downloadSHA256, execLog, execUnlogged, extendHashWith, extractFromDirectory, fail, fatalToInternal, getInternalTools, getTool, hashFromString, input, jobs, map, map2, map3, map4, map5, mapError, named, run, sequence, succeed, timed, toResult, triggerDebugger, which, withDebug, withEnv, withFile, withIdlePriority, withMemoryLimitInBytes, withPrefix, withWarning)
+module BuildTask.Internal exposing (BuildTask(..), Command, DownloadError(..), Error(..), Input, InternalTools, State, Warning, allowFatal, andThen, andThen2, combineBy, commandLog, commandLogWith, derive, downloadSHA256, execLog, execUnlogged, extendHashWith, extractFromDirectory, fail, fatalToInternal, getInternalTools, getTool, hashFromString, input, jobs, map, map2, map3, map4, map5, mapError, named, run, sequence, succeed, timed, toResult, triggerDebugger, which, withDebug, withEnv, withFile, withIdlePriority, withMemoryLimitInBytes, withPrefix, withWarning)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Customs
@@ -115,77 +115,87 @@ derive description target inner =
                     else
                         BackendTask.succeed ()
             in
-            Do.do appendLog <| \_ ->
-            if (HashSet.member target existing && not input_.check) || HashSet.member target state.deps then
-                BackendTask.succeed ( target, { deps = newDeps, warnings = state.warnings } )
+            Do.do appendLog <|
+                \_ ->
+                    if (HashSet.member target existing && not input_.check) || HashSet.member target state.deps then
+                        BackendTask.succeed ( target, { deps = newDeps, warnings = state.warnings } )
 
-            else
-                let
-                    targetPath : String
-                    targetPath =
-                        Hash.toPath buildPath target
-                in
-                Do.do (File.exists targetPath) <| \exists ->
-                if exists && not input_.check && not input_.debug then
-                    BackendTask.succeed ( target, { deps = newDeps, warnings = state.warnings } )
+                    else
+                        let
+                            targetPath : String
+                            targetPath =
+                                Hash.toPath buildPath target
+                        in
+                        Do.do (File.exists targetPath) <|
+                            \exists ->
+                                if exists && not input_.check && not input_.debug then
+                                    BackendTask.succeed ( target, { deps = newDeps, warnings = state.warnings } )
 
-                else
-                    let
-                        tmp : Hash Temporary
-                        tmp =
-                            Hash.toTemporary target
+                                else
+                                    let
+                                        tmp : Hash Temporary
+                                        tmp =
+                                            Hash.toTemporary target
 
-                        tmpPath : String
-                        tmpPath =
-                            Hash.toPathTemporary buildPath tmp
-                    in
-                    Do.do
-                        (BackendTask.File.Extra.removeFileIfExists tmpPath
-                            |> BackendTask.mapError InternalError
-                        )
-                    <| \_ ->
-                    Do.do
-                        (inner input_ tmp
-                            |> BackendTask.onError
-                                (\e ->
+                                        tmpPath : String
+                                        tmpPath =
+                                            Hash.toPathTemporary buildPath tmp
+                                    in
                                     Do.do
                                         (BackendTask.File.Extra.removeFileIfExists tmpPath
                                             |> BackendTask.mapError InternalError
                                         )
-                                    <| \_ ->
-                                    BackendTask.fail e
-                                )
-                        )
-                    <| \_ ->
-                    Do.do
-                        (if exists then
-                            Do.do
-                                (execUnlogged input_ internalTools.diff.name [ "-r", tmpPath, targetPath ]
-                                    |> BackendTask.onError
-                                        (\e ->
-                                            Do.log ("Error inside " ++ description) <| \_ ->
-                                            BackendTask.fail (InternalError e)
-                                        )
-                                )
-                            <| \_ ->
-                            BackendTask.File.Extra.removeFileIfExists tmpPath
-                                |> BackendTask.mapError InternalError
+                                    <|
+                                        \_ ->
+                                            Do.do
+                                                (inner input_ tmp
+                                                    |> BackendTask.onError
+                                                        (\e ->
+                                                            Do.do
+                                                                (BackendTask.File.Extra.removeFileIfExists tmpPath
+                                                                    |> BackendTask.mapError InternalError
+                                                                )
+                                                            <|
+                                                                \_ ->
+                                                                    BackendTask.fail e
+                                                        )
+                                                )
+                                            <|
+                                                \_ ->
+                                                    Do.do
+                                                        (if exists then
+                                                            Do.do
+                                                                (execUnlogged input_ internalTools.diff.name [ "-r", tmpPath, targetPath ]
+                                                                    |> BackendTask.onError
+                                                                        (\e ->
+                                                                            Do.log ("Error inside " ++ description) <|
+                                                                                \_ ->
+                                                                                    BackendTask.fail (InternalError e)
+                                                                        )
+                                                                )
+                                                            <|
+                                                                \_ ->
+                                                                    BackendTask.File.Extra.removeFileIfExists tmpPath
+                                                                        |> BackendTask.mapError InternalError
 
-                         else
-                            Script.move { from = tmpPath, to = targetPath }
-                                |> BackendTask.onError
-                                    (\e ->
-                                        Do.log ("Error inside " ++ description) <| \_ ->
-                                        BackendTask.fail (InternalError e)
-                                    )
-                        )
-                    <| \_ ->
-                    Do.do
-                        (execUnlogged input_ "chmod" [ "-R", "a=rX", targetPath ]
-                            |> BackendTask.mapError InternalError
-                        )
-                    <| \_ ->
-                    BackendTask.succeed ( target, { deps = newDeps, warnings = state.warnings } )
+                                                         else
+                                                            Script.move { from = tmpPath, to = targetPath }
+                                                                |> BackendTask.onError
+                                                                    (\e ->
+                                                                        Do.log ("Error inside " ++ description) <|
+                                                                            \_ ->
+                                                                                BackendTask.fail (InternalError e)
+                                                                    )
+                                                        )
+                                                    <|
+                                                        \_ ->
+                                                            Do.do
+                                                                (execUnlogged input_ "chmod" [ "-R", "a=rX", targetPath ]
+                                                                    |> BackendTask.mapError InternalError
+                                                                )
+                                                            <|
+                                                                \_ ->
+                                                                    BackendTask.succeed ( target, { deps = newDeps, warnings = state.warnings } )
         )
 
 
@@ -375,8 +385,9 @@ withFile hash f =
                 (File.rawFile (Hash.toPath buildPath hash)
                     |> BackendTask.mapError UserError
                 )
-            <| \raw ->
-            runMonad (f raw) input_ { deps = HashSet.insert hash state.deps, warnings = state.warnings }
+            <|
+                \raw ->
+                    runMonad (f raw) input_ { deps = HashSet.insert hash state.deps, warnings = state.warnings }
         )
 
 
@@ -396,46 +407,52 @@ run config buildPath m =
         (Script.makeDirectory { recursive = True } (Path.toString buildPath)
             |> BackendTask.mapError InternalError
         )
-    <| \_ ->
-    Do.do (listExisting buildPath |> BackendTask.mapError InternalError) <| \existing ->
-    Do.do
-        (case config.jobs of
-            Nothing ->
-                BackendTask.mapError InternalError (nproc { memoryLimit = Nothing, prefix = [], env = Dict.empty, idlePriority = False, debug = config.debug })
+    <|
+        \_ ->
+            Do.do (listExisting buildPath |> BackendTask.mapError InternalError) <|
+                \existing ->
+                    Do.do
+                        (case config.jobs of
+                            Nothing ->
+                                BackendTask.mapError InternalError (nproc { memoryLimit = Nothing, prefix = [], env = Dict.empty, idlePriority = False, debug = config.debug })
 
-            Just j ->
-                BackendTask.succeed j
-        )
-    <| \jobs_ ->
-    Do.do (getInternalTools |> BackendTask.mapError InternalError) <| \internalTools ->
-    let
-        input_ : t -> Input t
-        input_ tools =
-            { existing = existing
-            , prefix = []
-            , buildPath = buildPath
-            , jobs = jobs_
-            , debug = config.debug
-            , hashKind = config.hashKind
-            , check = config.check
-            , keepFailed = config.keepFailed
-            , env = Dict.empty
-            , memoryLimit = Nothing
-            , idlePriority = False
-            , tools = tools
-            , internalTools = internalTools
-            }
-    in
-    Do.do (runMonad config.getTools (input_ ()) { deps = HashSet.empty, warnings = Set.empty }) <| \( tools, intermediate ) ->
-    Do.do (runMonad m (input_ tools) intermediate) <| \( output, state ) ->
-    { output = Path.path (Hash.toPath buildPath output)
-    , intermediate =
-        state.deps
-            |> HashSet.toList
-            |> List.map (\raw -> raw |> Hash.toPath buildPath |> Path.path)
-    , warnings = state.warnings
-    }
-        |> BackendTask.succeed
+                            Just j ->
+                                BackendTask.succeed j
+                        )
+                    <|
+                        \jobs_ ->
+                            Do.do (getInternalTools |> BackendTask.mapError InternalError) <|
+                                \internalTools ->
+                                    let
+                                        input_ : t -> Input t
+                                        input_ tools =
+                                            { existing = existing
+                                            , prefix = []
+                                            , buildPath = buildPath
+                                            , jobs = jobs_
+                                            , debug = config.debug
+                                            , hashKind = config.hashKind
+                                            , check = config.check
+                                            , keepFailed = config.keepFailed
+                                            , env = Dict.empty
+                                            , memoryLimit = Nothing
+                                            , idlePriority = False
+                                            , tools = tools
+                                            , internalTools = internalTools
+                                            }
+                                    in
+                                    Do.do (runMonad config.getTools (input_ ()) { deps = HashSet.empty, warnings = Set.empty }) <|
+                                        \( tools, intermediate ) ->
+                                            Do.do (runMonad m (input_ tools) intermediate) <|
+                                                \( output, state ) ->
+                                                    { output = Path.path (Hash.toPath buildPath output)
+                                                    , intermediate =
+                                                        state.deps
+                                                            |> HashSet.toList
+                                                            |> List.map (\raw -> raw |> Hash.toPath buildPath |> Path.path)
+                                                    , warnings = state.warnings
+                                                    }
+                                                        |> BackendTask.succeed
 
 
 getInternalTools : BackendTask FatalError InternalTools
@@ -544,37 +561,40 @@ nproc input_ =
             -> (() -> BackendTask FatalError Int)
             -> BackendTask FatalError Int
         tryRunningOrElse cmd args orElse =
-            Do.do (commandUnlogged input_ cmd args |> BackendTask.toResult) <| \nprocResult ->
-            case nprocResult of
-                Ok output ->
-                    let
-                        trimmed : String
-                        trimmed =
-                            String.trim output
-                    in
-                    case String.toInt trimmed of
-                        Nothing ->
+            Do.do (commandUnlogged input_ cmd args |> BackendTask.toResult) <|
+                \nprocResult ->
+                    case nprocResult of
+                        Ok output ->
                             let
-                                message : String
-                                message =
-                                    "Invalid " ++ String.join " " (cmd :: args) ++ " output: " ++ Utils.escape trimmed
+                                trimmed : String
+                                trimmed =
+                                    String.trim output
                             in
-                            BackendTask.fail (FatalError.fromString message)
+                            case String.toInt trimmed of
+                                Nothing ->
+                                    let
+                                        message : String
+                                        message =
+                                            "Invalid " ++ String.join " " (cmd :: args) ++ " output: " ++ Utils.escape trimmed
+                                    in
+                                    BackendTask.fail (FatalError.fromString message)
 
-                        Just j ->
-                            BackendTask.succeed j
+                                Just j ->
+                                    BackendTask.succeed j
 
-                Err _ ->
-                    orElse ()
+                        Err _ ->
+                            orElse ()
     in
-    tryRunningOrElse "nproc" [ "--all" ] <| \_ ->
-    tryRunningOrElse "sysctl" [ "-n", "hw.logicalcpu" ] <| \_ ->
-    let
-        message : String
-        message =
-            "Failed to run either `nproc --all` or `sysctl -n hw.logicalcpu`. You can work around this by specifying an explicit number of jobs to run in parallel"
-    in
-    BackendTask.fail (FatalError.fromString message)
+    tryRunningOrElse "nproc" [ "--all" ] <|
+        \_ ->
+            tryRunningOrElse "sysctl" [ "-n", "hw.logicalcpu" ] <|
+                \_ ->
+                    let
+                        message : String
+                        message =
+                            "Failed to run either `nproc --all` or `sysctl -n hw.logicalcpu`. You can work around this by specifying an explicit number of jobs to run in parallel"
+                    in
+                    BackendTask.fail (FatalError.fromString message)
 
 
 succeed : a -> BuildTask tools e a
@@ -643,55 +663,61 @@ input inputPath =
                     |> BackendTask.allowFatal
                     |> BackendTask.mapError UserError
                 )
-            <| \body ->
-            case Hash.fromChecksum body of
-                Err e ->
-                    BackendTask.fail (UserError (FatalError.fromString e))
+            <|
+                \body ->
+                    case Hash.fromChecksum body of
+                        Err e ->
+                            BackendTask.fail (UserError (FatalError.fromString e))
 
-                Ok hash ->
-                    BackendTask.succeed ( hash, deps )
+                        Ok hash ->
+                            BackendTask.succeed ( hash, deps )
         )
         |> andThen
             (\hash ->
-                derive "input" hash <| \{ buildPath } target ->
-                Script.copyFile { from = Path.toString inputPath, to = Hash.toPathTemporary buildPath target }
-                    |> BackendTask.mapError UserError
+                derive "input" hash <|
+                    \{ buildPath } target ->
+                        Script.copyFile { from = Path.toString inputPath, to = Hash.toPathTemporary buildPath target }
+                            |> BackendTask.mapError UserError
             )
 
 
 which : String -> BuildTask tools FatalError Command
 which command =
     BuildTask "which"
-        (\input_ deps ->
+        (\_ deps ->
             Do.do
                 (Script.expectWhich command
                     |> BackendTask.mapError UserError
                 )
-            <| \path ->
-            Do.do
-                (Script.command "b3sum" [ path ]
-                    |> BackendTask.mapError InternalError
-                )
-            <| \line ->
-            case Hash.fromChecksum line of
-                Ok hash ->
-                    BackendTask.succeed ( { name = command, hash = hash }, deps )
+            <|
+                \path ->
+                    Do.do
+                        (Script.command "b3sum" [ path ]
+                            |> BackendTask.mapError InternalError
+                        )
+                    <|
+                        \line ->
+                            case Hash.fromChecksum line of
+                                Ok hash ->
+                                    BackendTask.succeed ( { name = command, hash = hash }, deps )
 
-                Err e ->
-                    BackendTask.fail (InternalError (FatalError.fromString e))
+                                Err e ->
+                                    BackendTask.fail (InternalError (FatalError.fromString e))
         )
 
 
 which_ : String -> BackendTask FatalError Command
 which_ name =
-    Do.do (Script.expectWhich name) <| \path ->
-    Do.command "b3sum" [ path ] <| \line ->
-    case Hash.fromChecksum line of
-        Ok hash ->
-            BackendTask.succeed { name = name, hash = hash }
+    Do.do (Script.expectWhich name) <|
+        \path ->
+            Do.command "b3sum" [ path ] <|
+                \line ->
+                    case Hash.fromChecksum line of
+                        Ok hash ->
+                            BackendTask.succeed { name = name, hash = hash }
 
-        Err e ->
-            BackendTask.fail (FatalError.fromString e)
+                        Err e ->
+                            BackendTask.fail (FatalError.fromString e)
 
 
 type DownloadError
@@ -717,44 +743,47 @@ downloadSHA256 { url, sha256 } =
                 fail (InvalidHashHex sha256)
 
             Just _ ->
-                derive "downloadSHA256" (Hash.build sha256) <| \({ tools, buildPath } as input_) target ->
-                let
-                    tmpPath : String
-                    tmpPath =
-                        Hash.toPathTemporary buildPath target
-                in
-                Do.do
-                    (Stream.http
-                        { url = url
-                        , method = "GET"
-                        , headers = []
-                        , body = Http.emptyBody
-                        , retries = Nothing
-                        , timeoutInMs = Nothing
-                        }
-                        |> Stream.pipe (Stream.fileWrite tmpPath)
-                        |> Stream.run
-                        |> BackendTask.mapError (\e -> UserError (DownloadError e))
-                    )
-                <| \_ ->
-                Do.do
-                    (commandLog input_ tools.sha256sum.name [ tmpPath ]
-                        |> BackendTask.allowFatal
-                        |> BackendTask.mapError InternalError
-                    )
-                <| \body ->
-                if String.startsWith sha256 body then
-                    BackendTask.succeed ()
-
-                else
-                    BackendTask.fail
-                        (UserError
-                            (WrongHash
-                                { expected = sha256
-                                , actual = String.left 64 body
+                derive "downloadSHA256" (Hash.build sha256) <|
+                    \({ tools, buildPath } as input_) target ->
+                        let
+                            tmpPath : String
+                            tmpPath =
+                                Hash.toPathTemporary buildPath target
+                        in
+                        Do.do
+                            (Stream.http
+                                { url = url
+                                , method = "GET"
+                                , headers = []
+                                , body = Http.emptyBody
+                                , retries = Nothing
+                                , timeoutInMs = Nothing
                                 }
+                                |> Stream.pipe (Stream.fileWrite tmpPath)
+                                |> Stream.run
+                                |> BackendTask.mapError (\e -> UserError (DownloadError e))
                             )
-                        )
+                        <|
+                            \_ ->
+                                Do.do
+                                    (commandLog input_ tools.sha256sum.name [ tmpPath ]
+                                        |> BackendTask.allowFatal
+                                        |> BackendTask.mapError InternalError
+                                    )
+                                <|
+                                    \body ->
+                                        if String.startsWith sha256 body then
+                                            BackendTask.succeed ()
+
+                                        else
+                                            BackendTask.fail
+                                                (UserError
+                                                    (WrongHash
+                                                        { expected = sha256
+                                                        , actual = String.left 64 body
+                                                        }
+                                                    )
+                                                )
 
 
 {-| -}
@@ -1001,13 +1030,14 @@ named name encode action param =
                                                 }
                                                 |> BackendTask.mapError InternalError
                                             )
-                                        <| \_ ->
-                                        BackendTask.succeed
-                                            ( hash
-                                            , { deps = HashSet.insert hash newState.deps
-                                              , warnings = newState.warnings
-                                              }
-                                            )
+                                        <|
+                                            \_ ->
+                                                BackendTask.succeed
+                                                    ( hash
+                                                    , { deps = HashSet.insert hash newState.deps
+                                                      , warnings = newState.warnings
+                                                      }
+                                                    )
                                     )
                     )
             )
@@ -1138,18 +1168,19 @@ extractFromDirectory directory file =
     extendHashWith [ "extract", file ] directory
         |> andThen
             (\outputHash ->
-                derive ("extract " ++ file) outputHash <| \{ buildPath } target ->
-                Script.copyFile
-                    { from = Hash.toPath buildPath directory ++ "/" ++ file
-                    , to = Hash.toPathTemporary buildPath target
-                    }
-                    |> BackendTask.mapError
-                        (\fatal ->
-                            UserError
-                                { fatal = fatal
-                                , recoverable = File.FileDoesntExist
-                                }
-                        )
+                derive ("extract " ++ file) outputHash <|
+                    \{ buildPath } target ->
+                        Script.copyFile
+                            { from = Hash.toPath buildPath directory ++ "/" ++ file
+                            , to = Hash.toPathTemporary buildPath target
+                            }
+                            |> BackendTask.mapError
+                                (\fatal ->
+                                    UserError
+                                        { fatal = fatal
+                                        , recoverable = File.FileDoesntExist
+                                        }
+                                )
             )
 
 

@@ -5,17 +5,16 @@ import BackendTask exposing (BackendTask)
 import BackendTask.Customs
 import BackendTask.Do as Do
 import BackendTask.Extra
-import BackendTask.File.Extra
 import BackendTask.Time
 import BuildFile exposing (BuildFile)
-import BuildTask exposing (BuildTask, FileOrDirectory)
+import BuildTask
 import Cli.Option as Option
 import Cli.OptionsParser as OptionsParser
 import Cli.Program as Program
 import FastSet as Set exposing (Set)
 import FatalError exposing (FatalError)
 import Hash
-import Pages.Script as Script exposing (Script)
+import Pages.Script as Script
 import Path exposing (Path)
 import Time
 
@@ -117,105 +116,119 @@ programConfig buildFile =
 toTask : Config tools inputs -> BackendTask FatalError ()
 toTask config =
     BackendTask.Extra.profiling "main" <|
-        Do.do BackendTask.Time.now <| \begin ->
-        Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Getting inputs") <| \_ ->
-        Do.do
-            (config.buildFile.getInputs
-                { inputPath = config.inputPath
-                , buildPath = config.buildPath
-                , debug = config.debug
-                }
-            )
-        <| \inputs ->
-        Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Processing inputs") <| \_ ->
-        Do.exec "mkdir" [ "-p", Path.toString config.buildPath ] <| \_ ->
-        Do.do
-            (BuildTask.run
-                { jobs = config.jobs
-                , debug = config.debug
-                , check = config.check
-                , hashKind =
-                    let
-                        (HashKind kind) =
-                            config.hashKind
-                    in
-                    kind
-                , keepFailed = config.keepFailed
-                , getTools = config.buildFile.getTools inputs
-                }
-                config.buildPath
-                (config.buildFile.buildAction
-                    { inputPath = config.inputPath
-                    , buildPath = config.buildPath
-                    }
-                    inputs
-                )
-                |> BackendTask.mapError buildErrorToFatalError
-            )
-        <| \combined ->
-        Do.do
-            (Script.removeFile (Path.toString config.outputName)
-                |> BackendTask.onError (\_ -> BackendTask.succeed ())
-            )
-        <| \_ ->
-        symlink
-            { source = config.outputName
-            , target =
-                Path.relativeTo
-                    (Path.directory config.outputName)
-                    combined.output
-            }
-        <| \_ ->
-        Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Output: " ++ Path.toString combined.output) <| \_ ->
-        Do.do (BackendTask.Customs.readdir config.buildPath) <| \actualList ->
-        let
-            expected : Set String
-            expected =
-                combined.intermediate
-                    |> List.map Path.toString
-                    |> Set.fromList
+        Do.do BackendTask.Time.now <|
+            \begin ->
+                Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Getting inputs") <|
+                    \_ ->
+                        Do.do
+                            (config.buildFile.getInputs
+                                { inputPath = config.inputPath
+                                , buildPath = config.buildPath
+                                , debug = config.debug
+                                }
+                            )
+                        <|
+                            \inputs ->
+                                Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Processing inputs") <|
+                                    \_ ->
+                                        Do.exec "mkdir" [ "-p", Path.toString config.buildPath ] <|
+                                            \_ ->
+                                                Do.do
+                                                    (BuildTask.run
+                                                        { jobs = config.jobs
+                                                        , debug = config.debug
+                                                        , check = config.check
+                                                        , hashKind =
+                                                            let
+                                                                (HashKind kind) =
+                                                                    config.hashKind
+                                                            in
+                                                            kind
+                                                        , keepFailed = config.keepFailed
+                                                        , getTools = config.buildFile.getTools inputs
+                                                        }
+                                                        config.buildPath
+                                                        (config.buildFile.buildAction
+                                                            { inputPath = config.inputPath
+                                                            , buildPath = config.buildPath
+                                                            }
+                                                            inputs
+                                                        )
+                                                        |> BackendTask.mapError buildErrorToFatalError
+                                                    )
+                                                <|
+                                                    \combined ->
+                                                        Do.do
+                                                            (Script.removeFile (Path.toString config.outputName)
+                                                                |> BackendTask.onError (\_ -> BackendTask.succeed ())
+                                                            )
+                                                        <|
+                                                            \_ ->
+                                                                symlink
+                                                                    { source = config.outputName
+                                                                    , target =
+                                                                        Path.relativeTo
+                                                                            (Path.directory config.outputName)
+                                                                            combined.output
+                                                                    }
+                                                                <|
+                                                                    \_ ->
+                                                                        Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Output: " ++ Path.toString combined.output) <|
+                                                                            \_ ->
+                                                                                Do.do (BackendTask.Customs.readdir config.buildPath) <|
+                                                                                    \actualList ->
+                                                                                        let
+                                                                                            expected : Set String
+                                                                                            expected =
+                                                                                                combined.intermediate
+                                                                                                    |> List.map Path.toString
+                                                                                                    |> Set.fromList
 
-            actual : Set String
-            actual =
-                actualList
-                    |> List.map (\file -> Path.toString config.buildPath ++ "/" ++ file)
-                    |> Set.fromList
+                                                                                            actual : Set String
+                                                                                            actual =
+                                                                                                actualList
+                                                                                                    |> List.map (\file -> Path.toString config.buildPath ++ "/" ++ file)
+                                                                                                    |> Set.fromList
 
-            unexpected : Set String
-            unexpected =
-                Set.diff actual expected
-        in
-        if config.removeStale then
-            Do.log ("Removing " ++ String.fromInt (Set.size unexpected) ++ " files from the build directory") <| \_ ->
-            Do.do
-                (Set.toList unexpected
-                    |> List.map
-                        (\i ->
-                            Do.exec "chmod" [ "-R", "700", i ] <| \_ ->
-                            Script.exec "rm" [ "-rf", i ]
-                        )
-                    |> BackendTask.Extra.sequence_
-                )
-            <| \_ ->
-            Do.do BackendTask.Time.now <| \end ->
-            let
-                elapsed : Int
-                elapsed =
-                    Time.posixToMillis end - Time.posixToMillis begin
+                                                                                            unexpected : Set String
+                                                                                            unexpected =
+                                                                                                Set.diff actual expected
+                                                                                        in
+                                                                                        if config.removeStale then
+                                                                                            Do.log ("Removing " ++ String.fromInt (Set.size unexpected) ++ " files from the build directory") <|
+                                                                                                \_ ->
+                                                                                                    Do.do
+                                                                                                        (Set.toList unexpected
+                                                                                                            |> List.map
+                                                                                                                (\i ->
+                                                                                                                    Do.exec "chmod" [ "-R", "700", i ] <|
+                                                                                                                        \_ ->
+                                                                                                                            Script.exec "rm" [ "-rf", i ]
+                                                                                                                )
+                                                                                                            |> BackendTask.Extra.sequence_
+                                                                                                        )
+                                                                                                    <|
+                                                                                                        \_ ->
+                                                                                                            Do.do BackendTask.Time.now <|
+                                                                                                                \end ->
+                                                                                                                    let
+                                                                                                                        elapsed : Int
+                                                                                                                        elapsed =
+                                                                                                                            Time.posixToMillis end - Time.posixToMillis begin
 
-                msg : String
-                msg =
-                    "Build done in "
-                        ++ timeToString elapsed
-                        ++ " with "
-                        ++ String.fromInt (Set.size combined.warnings)
-                        ++ " "
-                        ++ plural (Set.size combined.warnings) "warning" "warnings"
-            in
-            Script.log msg
+                                                                                                                        msg : String
+                                                                                                                        msg =
+                                                                                                                            "Build done in "
+                                                                                                                                ++ timeToString elapsed
+                                                                                                                                ++ " with "
+                                                                                                                                ++ String.fromInt (Set.size combined.warnings)
+                                                                                                                                ++ " "
+                                                                                                                                ++ plural (Set.size combined.warnings) "warning" "warnings"
+                                                                                                                    in
+                                                                                                                    Script.log msg
 
-        else
-            Script.log (String.fromInt (Set.size unexpected) ++ " stale files in the build directory")
+                                                                                        else
+                                                                                            Script.log (String.fromInt (Set.size unexpected) ++ " stale files in the build directory")
 
 
 buildErrorToFatalError : BuildTask.Error FatalError -> FatalError
