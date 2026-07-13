@@ -12,8 +12,10 @@ when inside the directory containing this file.
 -}
 
 import Derive
+import Docs.NoMissing
 import Docs.ReviewAtDocs
 import Docs.ReviewLinksAndSections
+import Docs.UpToDateReadmeLinks
 import EqualsCaseable
 import HtmlToElm
 import LimitAliasedRecordSize
@@ -64,9 +66,14 @@ import VariablesBetweenCaseOf.AccessInCases
 
 config : List Rule
 config =
-    [ Docs.ReviewAtDocs.rule
+    [ Docs.NoMissing.rule
+        { document = Docs.NoMissing.onlyExposed
+        , from = Docs.NoMissing.exposedModules
+        }
     , Derive.rule True []
+    , Docs.ReviewAtDocs.rule
     , Docs.ReviewLinksAndSections.rule
+    , Docs.UpToDateReadmeLinks.rule
     , EqualsCaseable.forbid EqualsCaseable.InIf
     , HtmlToElm.rule
     , LimitAliasedRecordSize.rule (20 |> LimitAliasedRecordSize.maxRecordSize)
@@ -112,11 +119,6 @@ config =
     , Validate.Regexes.rule
     , VariablesBetweenCaseOf.AccessInCases.forbid
     ]
-        |> List.map
-            (Rule.ignoreErrorsForDirectories
-                [ "codegen/Gen"
-                ]
-            )
 
 
 pipelineConfig : List (ReviewPipelineStyles.PipelineRule ())
