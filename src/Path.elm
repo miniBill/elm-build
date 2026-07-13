@@ -27,6 +27,11 @@ import List.Extra
 
 
 {-| -}
+type Path
+    = Path (List String) String
+
+
+{-| -}
 directory : Path -> Path
 directory (Path d _) =
     case List.reverse d of
@@ -69,10 +74,6 @@ path p =
 
         file :: dir ->
             Path (List.reverse dir) file
-
-
-type Path
-    = Path (List String) String
 
 
 {-| -}
