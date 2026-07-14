@@ -10,6 +10,7 @@ import Json.Decode
 import Json.Encode
 import Pages.Script as Script
 import Path.Posix as Path exposing (Absolute, Directory, File, Path, Relative)
+import Utils
 import XBytes
 
 
@@ -73,10 +74,10 @@ resolveFile path =
         |> BackendTask.andThen
             (\raw ->
                 case Path.parseAbsoluteFile raw of
-                    Err e ->
-                        BackendTask.fail (FatalError.fromString (Debug.toString e))
+                    Nothing ->
+                        BackendTask.fail (FatalError.fromString ("Failed to parse absolute directory " ++ Utils.escape raw))
 
-                    Ok parsed ->
+                    Just parsed ->
                         BackendTask.succeed parsed
             )
 
@@ -87,10 +88,10 @@ resolveDirectory path =
         |> BackendTask.andThen
             (\raw ->
                 case Path.parseAbsoluteDirectory raw of
-                    Err e ->
-                        BackendTask.fail (FatalError.fromString (Debug.toString e))
+                    Nothing ->
+                        BackendTask.fail (FatalError.fromString ("Failed to parse absolute directory " ++ Utils.escape raw))
 
-                    Ok parsed ->
+                    Just parsed ->
                         BackendTask.succeed parsed
             )
 
@@ -125,17 +126,17 @@ listFilesAndDirectoriesIn path =
     let
         decodeListAt :
             String
-            -> (String -> Result error (Path Relative kind))
+            -> (String -> Maybe (Path Relative kind))
             -> Json.Decode.Decoder (List (Path Relative kind))
         decodeListAt field inner =
             Json.Decode.string
                 |> Json.Decode.andThen
                     (\file ->
                         case inner file of
-                            Err e ->
-                                Json.Decode.fail (Debug.toString e)
+                            Nothing ->
+                                Json.Decode.fail ("Invalid path " ++ Utils.escape file)
 
-                            Ok parsed ->
+                            Just parsed ->
                                 Json.Decode.succeed parsed
                     )
                 |> Json.Decode.list

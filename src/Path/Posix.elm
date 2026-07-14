@@ -6,7 +6,7 @@ module Path.Posix exposing
     , append, stripProperPrefix, isProperPrefixOf, replaceProperPrefix, parent, filename, dirname, addExtension, splitExtension, fileExtension, replaceExtension, mapAbsoluteOrRelative, extractAbsoluteOrRelative
     , parseAbsoluteDirectory, parseRelativeDirectory, parseAbsoluteFile, parseRelativeFile, parseAbsoluteFileOrDirectory, parseRelativeFileOrDirectory
     , toString, absoluteDirectoryToString, relativeDirectoryToString, absoluteFileToString, relativeFileToString
-    , AbsoluteError, ParseError, RelativeError, relativeTo, splitDirectory, toFileOrDirectory
+    , relativeTo, splitDirectory, toFileOrDirectory
     )
 
 {-| Module for handling paths. The implementation is based on [path](https://hackage.haskell.org/package/path).
@@ -33,6 +33,11 @@ module Path.Posix exposing
 ## Conversion
 
 @docs toString, absoluteDirectoryToString, relativeDirectoryToString, absoluteFileToString, relativeFileToString
+
+
+## Utilities
+
+@docs relativeTo, splitDirectory, toFileOrDirectory
 
 
 ## License notice
@@ -62,6 +67,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 -}
 
+import List.Extra
+import Path.Utils as Utils
 import Result.Extra
 
 
@@ -184,10 +191,10 @@ addExtension ext (Path path) =
 
             else
                 case parseRelativeFile ext of
-                    Err _ ->
+                    Nothing ->
                         Err InvalidExtension
 
-                    Ok _ ->
+                    Just _ ->
                         Ok (Path (path ++ ext))
 
         _ ->
@@ -228,57 +235,115 @@ relativeFileToString p =
     toString p
 
 
-{-| The errors that can be encountered while parsing a path.
+parseAbsoluteDirectory : String -> Maybe (Path Absolute Directory)
+parseAbsoluteDirectory filepath =
+    if
+        Utils.isAbsolute filepath
+            && not (Utils.hasParentDirectory filepath)
+            && Utils.isValid filepath
+    then
+        Just (Path (normalizeDirectory filepath))
 
-  - `EmptyInput` - the input was empty
-  - `ContainsDotDot` - the input contains `..` - if your inputs can contain `..` you should use `resolveFile` / `resolveDirectory` instead
-  - `BaseError` - errors specific to `Relative` / `Absolute` parsing
-
--}
-type ParseError base
-    = EmptyInput
-    | ContainsDotDot
-    | BaseError base
-
-
-{-| The path does not start with `/` even though it should have been absolute.
--}
-type AbsoluteError
-    = DoesNotStartWithSlash
+    else
+        Nothing
 
 
-{-| The path starts with `/` even though it should have been relative.
--}
-type RelativeError
-    = StartsWithSlash
+normalizeDirectory : String -> String
+normalizeDirectory path =
+    let
+        -- Represent a "." in relative dir path as "" internally so that it
+        -- composes without having to renormalize the path.
+        normalizeRelDir : String -> String
+        normalizeRelDir p =
+            case p of
+                "./" ->
+                    ""
+
+                _ ->
+                    p
+    in
+    path
+        |> normalizeFilePath
+        |> Utils.addTrailingPathSeparator
+        |> normalizeRelDir
 
 
-parseAbsoluteDirectory : String -> Result (ParseError AbsoluteError) (Path Absolute Directory)
-parseAbsoluteDirectory p =
-    Debug.todo "Path.parseAbsoluteDirectory"
-
-
-parseRelativeDirectory : String -> Result (ParseError RelativeError) (Path Relative Directory)
+parseRelativeDirectory : String -> Maybe (Path Relative Directory)
 parseRelativeDirectory p =
     Debug.todo "Path.parseRelativeDirectory"
 
 
-parseAbsoluteFile : String -> Result (ParseError AbsoluteError) (Path Absolute File)
+parseAbsoluteFile : String -> Maybe (Path Absolute File)
 parseAbsoluteFile p =
     Debug.todo "Path.parseAbsoluteFile"
 
 
-parseRelativeFile : String -> Result (ParseError RelativeError) (Path Relative File)
-parseRelativeFile p =
-    Debug.todo "Path.parseRelativeFile"
+{-| Convert a relative path to a normalized relative file `Path`.
+
+Returns `Nothing` when the supplied path:
+
+  - is not a relative path
+
+  - is `""`
+
+  - is a directory path i.e.
+      - has a trailing path separator
+      - is `.` or ends in `/.`
+
+  - contains a `..` path component representing the parent directory
+
+  - is not a valid path (See 'FilePath.isValid')
+
+-}
+parseRelativeFile : String -> Maybe (Path Relative File)
+parseRelativeFile filepath =
+    if validRelFile filepath then
+        normalizeFilePath filepath
+            |> Path
+            |> Just
+
+    else
+        Nothing
 
 
-parseAbsoluteFileOrDirectory : String -> Result (ParseError AbsoluteError) (Path Absolute FileOrDirectory)
+{-| Is the string a valid relative file?
+-}
+validRelFile : String -> Bool
+validRelFile filepath =
+    not (String.isEmpty filepath)
+        && not (Utils.isAbsolute filepath)
+        && not (Utils.hasTrailingPathSeparator filepath)
+        && not (Utils.hasParentDirectory filepath)
+        && (filepath /= ".")
+        && Utils.isValid filepath
+
+
+normalizeFilePath : String -> String
+normalizeFilePath path =
+    path
+        |> Utils.normalise
+        |> String.toList
+        |> normalizeLeadingSeps
+
+
+normalizeLeadingSeps : List Char -> String
+normalizeLeadingSeps path =
+    let
+        ( leadingSeps, rest ) =
+            List.Extra.span Utils.isPathSeparator path
+
+        normLeadingSep =
+            String.repeat (min 1 (List.length leadingSeps)) "/"
+    in
+    normLeadingSep ++ String.fromList rest
+
+
+parseAbsoluteFileOrDirectory : String -> Maybe (Path Absolute FileOrDirectory)
 parseAbsoluteFileOrDirectory p =
     Debug.todo "Path.parseAbsoluteFileOrDirectory"
 
 
-parseRelativeFileOrDirectory : String -> Result (ParseError RelativeError) (Path Relative FileOrDirectory)
+parseRelativeFileOrDirectory : String -> Maybe (Path Relative FileOrDirectory)
 parseRelativeFileOrDirectory p =
     Debug.todo "Path.parseRelativeFileOrDirectory"
 
@@ -298,17 +363,17 @@ dirname (Path p) =
     Debug.todo "Path.dirname"
 
 
-fileExtension : Path base File -> Result () String
+fileExtension : Path base File -> Maybe String
 fileExtension (Path p) =
     Debug.todo "Path.fileExtension"
 
 
-replaceExtension : String -> Path base File -> Result () (Path base File)
+replaceExtension : String -> Path base File -> Maybe (Path base File)
 replaceExtension ext (Path p) =
     Debug.todo "Path.replaceExtension"
 
 
-splitExtension : Path base File -> Result () ( Path base File, String )
+splitExtension : Path base File -> Maybe ( Path base File, String )
 splitExtension (Path p) =
     Debug.todo "Path.splitExtension"
 

@@ -115,10 +115,10 @@ toTemporaryFile buildPath hash =
         )
 
 
-trustMe : Result e v -> v
+trustMe : Maybe v -> v
 trustMe res =
     case res of
-        Err _ ->
+        Nothing ->
             let
                 _ =
                     -- Crash
@@ -126,7 +126,7 @@ trustMe res =
             in
             trustMe res
 
-        Ok v ->
+        Just v ->
             v
 
 

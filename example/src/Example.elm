@@ -103,10 +103,14 @@ getInputs config =
                     (\found ->
                         found
                             |> List.sort
-                            |> Result.Extra.combineMap Path.parseRelativeFile
-                            |> Result.mapError
-                                (\e ->
-                                    FatalError.fromString ("Failed to parse input path " ++ Debug.toString e)
+                            |> Result.Extra.combineMap
+                                (\filename ->
+                                    case Path.parseRelativeFile filename of
+                                        Just file ->
+                                            Ok file
+
+                                        Nothing ->
+                                            Err (FatalError.fromString ("Invalid filename " ++ filename))
                                 )
                             |> BackendTask.fromResult
                     )
@@ -174,7 +178,7 @@ buildAction inputs =
     in
     Do.map4 T4
         (imagesElmFile tools processedFiles)
-        (Elm.codegen tools (fontsElmFile fontFiles) |> BuildTask.allowFatal)
+        (fontsElmFile fontFiles |> BuildTask.andThen (\file -> file |> Elm.codegen tools |> BuildTask.allowFatal))
         (imagesSizesFile imageFiles)
         (publicFolder |> BuildTask.allowFatal)
     <| \(T4 imagesElm fontsElm imageSizes public) ->
@@ -252,14 +256,16 @@ imagesSizesFile processedFiles =
 fontsElmFile :
     List (HashedFileWith Font.Data)
     ->
-        { path : Path Path.Relative Path.File
-        , contents : String
-        , warnings :
-            List
-                { declaration : String
-                , warning : String
-                }
-        }
+        BuildTask
+            FatalError
+            { path : Path Path.Relative Path.File
+            , contents : String
+            , warnings :
+                List
+                    { declaration : String
+                    , warning : String
+                    }
+            }
 fontsElmFile files =
     let
         raw : Elm.File
@@ -273,10 +279,16 @@ fontsElmFile files =
                     )
                 |> Elm.file [ "Fonts" ]
     in
-    { path = Path.parseRelativeFile raw.path |> trustMe
-    , contents = raw.contents
-    , warnings = raw.warnings
-    }
+    case Path.parseRelativeFile raw.path of
+        Nothing ->
+            BuildTask.fail (FatalError.fromString ("Invalid filename: " ++ raw.path))
+
+        Just path ->
+            { path = path
+            , contents = raw.contents
+            , warnings = raw.warnings
+            }
+                |> BuildTask.succeed
 
 
 imagesElmFile : Tools -> List ProcessedFile -> BuildTask FatalError FileOrDirectory
@@ -313,9 +325,9 @@ imagesElmFile tools list =
             encodeProcessedFiles
             (\processedFiles ->
                 let
-                    fromFilesResult : Result () (List Elm.Declaration)
+                    fromFilesResult : Maybe (List Elm.Declaration)
                     fromFilesResult =
-                        Result.Extra.combineMap
+                        Maybe.Extra.combineMap
                             (\processedFile ->
                                 if processedFile.svg then
                                     processedSvgToDeclaration processedFile
@@ -326,7 +338,7 @@ imagesElmFile tools list =
                             processedFiles
                 in
                 case fromFilesResult of
-                    Ok fromFiles ->
+                    Just fromFiles ->
                         let
                             file : Elm.File
                             file =
@@ -340,7 +352,7 @@ imagesElmFile tools list =
                         Do.allowFatal (BuildTask.writeFile file.contents) <| \hash ->
                         BuildTask.allowFatal (Elm.format tools hash)
 
-                    Err _ ->
+                    Nothing ->
                         BuildTask.fail (FatalError.fromString "Failed to process files")
             )
 
@@ -458,40 +470,40 @@ processFile tools inputs total index ( path, copyFile ) =
                 |> BuildTask.succeed
     in
     (case Path.fileExtension path of
-        Ok "webp" ->
+        Just "webp" ->
             doImage ()
 
-        Ok "jpg" ->
+        Just "jpg" ->
             doImage ()
 
-        Ok "jpeg" ->
+        Just "jpeg" ->
             doImage ()
 
-        Ok "png" ->
+        Just "png" ->
             doImage ()
 
-        Ok "ttf" ->
+        Just "ttf" ->
             doFont ()
 
-        Ok "otf" ->
+        Just "otf" ->
             doFont ()
 
-        Ok "svg" ->
+        Just "svg" ->
             doSvg ()
 
-        Ok "zip" ->
+        Just "zip" ->
             -- Ignore
             BuildTask.succeed Nothing
 
-        Ok "txt" ->
+        Just "txt" ->
             -- Ignore
             BuildTask.succeed Nothing
 
-        Ok "md" ->
+        Just "md" ->
             -- Ignore
             BuildTask.succeed Nothing
 
-        Ok "css" ->
+        Just "css" ->
             BuildTask.do copyFile <| \hash ->
             BuildTask.succeed (Just (ProcessedCss { filename = relative, hash = hash }))
 
@@ -505,10 +517,10 @@ processFile tools inputs total index ( path, copyFile ) =
         |> BuildTask.withPrefix prefix
 
 
-trustMe : Result e v -> v
+trustMe : Maybe v -> v
 trustMe res =
     case res of
-        Err _ ->
+        Nothing ->
             let
                 _ =
                     -- Crash
@@ -516,7 +528,7 @@ trustMe res =
             in
             trustMe res
 
-        Ok v ->
+        Just v ->
             v
 
 
@@ -534,10 +546,10 @@ image :
             }
 image tools relative copied =
     case Path.fileExtension relative of
-        Err _ ->
+        Nothing ->
             BuildTask.fail (FatalError.fromString ("Missing extension in " ++ Path.toString relative))
 
-        Ok originalExtension ->
+        Just originalExtension ->
             let
                 parseSizeFile : String -> BuildTask FatalError { width : Int, height : Int, sizes : List Int }
                 parseSizeFile sizeString =
@@ -730,14 +742,14 @@ standardFormats =
 
 processedImageToDeclaration :
     HashedFileWith { a | width : Int, height : Int }
-    -> Result () Elm.Declaration
+    -> Maybe Elm.Declaration
 processedImageToDeclaration original =
     let
         attrsAnnotation : Elm.Annotation.Annotation
         attrsAnnotation =
             Elm.Annotation.list (Gen.Html.annotation_.attribute (Elm.Annotation.var "msg"))
     in
-    Result.map2
+    Maybe.map2
         (\name ( pathWithoutExtension, extension ) ->
             Elm.declaration name
                 (Elm.fn
@@ -768,10 +780,10 @@ processedImageToDeclaration original =
 
 processedSvgToDeclaration :
     HashedFileWith { a | width : Int, height : Int }
-    -> Result () Elm.Declaration
+    -> Maybe Elm.Declaration
 processedSvgToDeclaration original =
     toVariableName original.filename
-        |> Result.map
+        |> Maybe.map
             (\name ->
                 let
                     attrsAnnotation : Elm.Annotation.Annotation
@@ -802,10 +814,10 @@ processedSvgToDeclaration original =
             )
 
 
-toVariableName : Path Path.Relative Path.File -> Result () String
+toVariableName : Path Path.Relative Path.File -> Maybe String
 toVariableName path =
     Path.splitExtension path
-        |> Result.map
+        |> Maybe.map
             (\( nameWithoutExtension, _ ) ->
                 let
                     stripLeadingUnderscores i =

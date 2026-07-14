@@ -52,10 +52,10 @@ codegen tools file =
         )
     <| \() ->
     case Path.parseRelativeDirectory "generated" of
-        Err _ ->
+        Nothing ->
             Debug.todo "Should not happen"
 
-        Ok generated ->
+        Just generated ->
             { filename = Path.append generated file.path
             , hash = formatted
             }

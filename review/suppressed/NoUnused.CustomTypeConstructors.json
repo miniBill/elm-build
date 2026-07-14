@@ -3,6 +3,6 @@
   "automatically created by": "elm-review suppress",
   "learn more": "elm-review suppress --help",
   "suppressions": [
-    { "count": 1, "filePath": "src/Build.elm" }
+    { "count": 6, "filePath": "src/Path/Posix.elm" }
   ]
 }

@@ -172,12 +172,12 @@ derive path description target inner =
                                 (\e ->
                                     if input.keepFailed then
                                         case Path.parseRelativeDirectory "failed" of
-                                            Err _ ->
+                                            Nothing ->
                                                 FatalError.fromString "Failed to build failed path"
                                                     |> InternalError
                                                     |> BackendTask.fail
 
-                                            Ok failed ->
+                                            Just failed ->
                                                 Do.do
                                                     (BackendTask.File.Extra.move
                                                         { from = tmpPath
@@ -1178,14 +1178,14 @@ extractFromDirectory directory file =
             (\outputHash ->
                 deriveFile ("extract " ++ file) outputHash <| \{ buildPath } target ->
                 case Path.parseRelativeFile file of
-                    Err e ->
+                    Nothing ->
                         UserError
-                            { fatal = FatalError.fromString (Debug.toString e)
+                            { fatal = FatalError.fromString ("Invalid filename: " ++ file)
                             , recoverable = File.FileDoesntExist
                             }
                             |> BackendTask.fail
 
-                    Ok filename ->
+                    Just filename ->
                         BackendTask.File.Extra.copyFile
                             { from =
                                 Path.append
