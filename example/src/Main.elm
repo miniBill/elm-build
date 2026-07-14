@@ -5,7 +5,7 @@ import Example
 import Cli.Option as Option
 import Cli.OptionsParser as OptionsParser exposing (OptionsParser)
 import Pages.Script as Script exposing (Script)
-import Path exposing (Path)
+import Path.Posix as Path exposing (Path)
 
 
 run : Script
@@ -27,7 +27,6 @@ run =
                 )
                 |> OptionsParser.with
                     (Option.requiredKeywordArg "input"
-                        |> Option.map Path.path
                         |> Option.withDisplayName "dir"
                         |> Option.withDescription "Input directory"
                     )

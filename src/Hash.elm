@@ -1,9 +1,10 @@
-module Hash exposing (Hash, Kind(..), Normal, Temporary, Workspace, build, fromChecksum, fromString, toPath, toPathTemporary, toPathWorkspace, toString, toTemporary, toWorkspace)
+module Hash exposing (Hash, Kind(..), Normal, Temporary, Workspace, build, fromChecksum, fromString, toDirectoryPath, toFileOrDirectoryPath, toFilePath, toPathWorkspace, toString, toTemporary, toTemporaryDirectory, toTemporaryFile, toWorkspace)
 
 import FNV1a
 import Hex
-import Path exposing (Path)
+import Path.Posix as Path exposing (Directory, File, FileOrDirectory, Path)
 import SHA256
+import Utils
 
 
 type Hash k
@@ -34,9 +35,29 @@ fromChecksum raw =
     let
         clean : String
         clean =
-            String.left 8 raw
+            raw
+                |> String.toLower
+                |> String.left 8
     in
-    Ok (Hash clean)
+    if
+        String.all
+            (\char ->
+                let
+                    code : Int
+                    code =
+                        Char.toCode char
+                in
+                -- 0-9
+                (0x30 <= code && code <= 0x39)
+                    -- a-f
+                    || (0x61 <= code && code <= 0x66)
+            )
+            clean
+    then
+        Ok (Hash clean)
+
+    else
+        Err ("Invalid hex string: " ++ Utils.escape clean)
 
 
 build : String -> Hash Normal
@@ -44,19 +65,79 @@ build i =
     Hash i
 
 
-toPath : Path -> Hash Normal -> String
-toPath buildPath hash =
-    Path.toString buildPath ++ "/" ++ toString hash
+toDirectoryPath : Path base Directory -> Hash Normal -> Path base Directory
+toDirectoryPath buildPath hash =
+    Path.append
+        buildPath
+        (Path.parseRelativeDirectory (toString hash)
+            |> -- hash is guaranteed to contain 0-9a-f, therefore the above will be valid
+               trustMe
+        )
 
 
-toPathTemporary : Path -> Hash Temporary -> String
-toPathTemporary buildPath hash =
-    Path.toString buildPath ++ "/tmp-" ++ toString hash
+toFileOrDirectoryPath : Path base Directory -> Hash Normal -> Path base FileOrDirectory
+toFileOrDirectoryPath buildPath hash =
+    Path.append
+        buildPath
+        (Path.parseRelativeFileOrDirectory (toString hash)
+            |> -- hash is guaranteed to contain 0-9a-f, therefore the above will be valid
+               trustMe
+        )
 
 
-toPathWorkspace : Path -> Hash Workspace -> String
+toFilePath : Path base Directory -> Hash Normal -> Path base File
+toFilePath buildPath hash =
+    Path.append
+        buildPath
+        (Path.parseRelativeFile (toString hash)
+            |> -- hash is guaranteed to contain 0-9a-f, therefore the above will be valid
+               trustMe
+        )
+
+
+toTemporaryDirectory : Path base Directory -> Hash Temporary -> Path base Directory
+toTemporaryDirectory buildPath hash =
+    Path.append
+        buildPath
+        (Path.parseRelativeDirectory ("tmp-" ++ toString hash)
+            |> -- hash is guaranteed to contain 0-9a-f, therefore the above will be valid
+               trustMe
+        )
+
+
+toTemporaryFile : Path base Directory -> Hash Temporary -> Path base File
+toTemporaryFile buildPath hash =
+    Path.append
+        buildPath
+        (Path.parseRelativeFile ("tmp-" ++ toString hash)
+            |> -- hash is guaranteed to contain 0-9a-f, therefore the above will be valid
+               trustMe
+        )
+
+
+trustMe : Result e v -> v
+trustMe res =
+    case res of
+        Err _ ->
+            let
+                _ =
+                    -- Crash
+                    modBy 0 0
+            in
+            trustMe res
+
+        Ok v ->
+            v
+
+
+toPathWorkspace : Path base Directory -> Hash Workspace -> Path base Directory
 toPathWorkspace buildPath hash =
-    Path.toString buildPath ++ "/workspace-" ++ toString hash
+    Path.append
+        buildPath
+        (Path.parseRelativeDirectory ("workspace-" ++ toString hash)
+            |> -- hash is guaranteed to contain 0-9a-f, therefore the above will be valid
+               trustMe
+        )
 
 
 toString : Hash k -> String
@@ -69,7 +150,7 @@ toTemporary (Hash hash) =
     Hash hash
 
 
-toWorkspace : Hash Temporary -> Hash Workspace
+toWorkspace : Hash Normal -> Hash Workspace
 toWorkspace (Hash hash) =
     Hash hash
 

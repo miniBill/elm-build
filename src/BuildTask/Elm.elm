@@ -7,7 +7,7 @@ import BuildTask.Unsafe as Unsafe
 import FatalError exposing (FatalError)
 import Hash
 import Pages.Script as Script
-import Path exposing (Path)
+import Path.Posix as Path exposing (Path)
 
 
 type CodegenError
@@ -18,18 +18,25 @@ type CodegenError
 
 
 codegen :
-    { path : String
-    , contents : String
-    , warnings :
-        List
-            { declaration : String
-            , warning : String
+    { tools | elm_format : BuildTask.Command }
+    ->
+        { path : Path Path.Relative Path.File
+        , contents : String
+        , warnings :
+            List
+                { declaration : String
+                , warning : String
+                }
+        }
+    ->
+        BuildTask
+            { fatal : FatalError, recoverable : CodegenError }
+            { filename : Path Path.Relative Path.File
+            , hash : FileOrDirectory
             }
-    }
-    -> BuildTask { tools | elm_format : BuildTask.Command } { fatal : FatalError, recoverable : CodegenError } { filename : Path, hash : FileOrDirectory }
-codegen file =
+codegen tools file =
     BuildTask.doWithError (BuildTask.writeFile file.contents) ErrorWritingUnformattedFile <| \hash ->
-    BuildTask.doWithError (format hash) ErrorFormatting <| \formatted ->
+    BuildTask.doWithError (format tools hash) ErrorFormatting <| \formatted ->
     BuildTask.doWithError (BuildTask.withFile formatted BuildTask.succeed) ErrorReadingFormattedFile <| \content ->
     BuildTask.do
         (if String.isEmpty (String.trim content) then
@@ -44,11 +51,16 @@ codegen file =
             BuildTask.succeed ()
         )
     <| \() ->
-    { filename = Path.path ("generated/" ++ file.path)
-    , hash = formatted
-    }
-        |> BuildTask.succeed
-        |> BuildTask.withWarnings (List.map formatWarning file.warnings)
+    case Path.parseRelativeDirectory "generated" of
+        Err _ ->
+            Debug.todo "Should not happen"
+
+        Ok generated ->
+            { filename = Path.append generated file.path
+            , hash = formatted
+            }
+                |> BuildTask.succeed
+                |> BuildTask.withWarnings (List.map formatWarning file.warnings)
 
 
 formatWarning : { declaration : String, warning : String } -> BuildTask.Warning
@@ -56,6 +68,6 @@ formatWarning warning =
     "In declaration " ++ warning.declaration ++ ": " ++ warning.warning
 
 
-format : FileOrDirectory -> BuildTask { tools | elm_format : BuildTask.Command } { fatal : FatalError, recoverable : Stream.Error () String } FileOrDirectory
-format hash =
-    Unsafe.pipeThrough .elm_format [ "--stdin" ] hash
+format : { tools | elm_format : BuildTask.Command } -> FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error () String } FileOrDirectory
+format { elm_format } hash =
+    Unsafe.pipeThrough elm_format [ "--stdin" ] hash

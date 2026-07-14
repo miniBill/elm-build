@@ -1,4 +1,4 @@
-module BackendTask.Extra exposing (combineBy, combineBy_, profiling, sequence_, timed)
+module BackendTask.Extra exposing (combineBy, combineBy_, inDir, profiling, sequence_, timed)
 
 import Array exposing (Array)
 import BackendTask exposing (BackendTask)
@@ -8,6 +8,7 @@ import BackendTask.Time
 import FatalError exposing (FatalError)
 import List.Extra
 import Pages.Script.Spinner as Spinner
+import Path.Posix as Path exposing (Path)
 import Rope exposing (Rope)
 import Time
 
@@ -202,3 +203,8 @@ profiling label t =
     Do.do t <| \res ->
     Do.do (BackendTask.Customs.profileEnd label) <| \_ ->
     BackendTask.succeed res
+
+
+inDir : Path base Path.Directory -> BackendTask error value -> BackendTask error value
+inDir dir task =
+    BackendTask.inDir (Path.toString dir) task

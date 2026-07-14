@@ -11,12 +11,12 @@ import Parser.Error
 import Parser.Workaround
 
 
-getSvgSize : FileOrDirectory -> BuildTask tools { fatal : FatalError, recoverable : File.FileReadError String } { width : Int, height : Int }
+getSvgSize : FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : File.FileReadError String } { width : Int, height : Int }
 getSvgSize hash =
     BuildTask.withFile hash parseSvgSize
 
 
-parseSvgSize : String -> BuildTask tools { fatal : FatalError, recoverable : File.FileReadError String } { width : Int, height : Int }
+parseSvgSize : String -> BuildTask { fatal : FatalError, recoverable : File.FileReadError String } { width : Int, height : Int }
 parseSvgSize input =
     case Parser.run viewBoxParser input of
         Ok { width, height } ->
@@ -79,11 +79,11 @@ errorToString src deadEnds =
         |> String.concat
 
 
-stripMetadata : FileOrDirectory -> BuildTask { tools | exiftool : Command } { fatal : FatalError, recoverable : Stream.Error () String } FileOrDirectory
-stripMetadata hash =
-    BuildTask.Unsafe.pipeThrough .exiftool [ "-all=", "-", "-o", "-" ] hash
+stripMetadata : { tools | exiftool : Command } -> FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error () String } FileOrDirectory
+stripMetadata { exiftool } hash =
+    BuildTask.Unsafe.pipeThrough exiftool [ "-all=", "-", "-o", "-" ] hash
 
 
-getSize : FileOrDirectory -> BuildTask { tools | identify : Command } { fatal : FatalError, recoverable : Stream.Error () String } FileOrDirectory
-getSize file =
-    BuildTask.Unsafe.pipeThrough .identify [ "-ping", "-format", "%w %h", "-" ] file
+getSize : { tools | identify : Command } -> FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error () String } FileOrDirectory
+getSize { identify } file =
+    BuildTask.Unsafe.pipeThrough identify [ "-ping", "-format", "%w %h", "-" ] file

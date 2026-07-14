@@ -1,6 +1,7 @@
 module Example exposing (HashedFileWith, Inputs, Tools, buildFile, image, standardFormats)
 
 import BackendTask exposing (BackendTask)
+import BackendTask.File.Extra
 import BackendTask.Glob as Glob
 import Build exposing (BuildFile)
 import BuildTask exposing (BuildTask, Command, FileOrDirectory)
@@ -26,15 +27,15 @@ import Gen.String
 import List.Extra
 import Maybe.Extra
 import Pages.Script as Script
-import Path exposing (Path)
+import Path.Posix as Path exposing (Path)
+import Result.Extra
 import String.Extra
 import Utils
 
 
-buildFile : BuildFile { inputPath : Path } Inputs Tools
+buildFile : BuildFile { inputPath : String } Inputs
 buildFile =
     { getInputs = getInputs
-    , getTools = getTools
     , buildAction = buildAction
     }
 
@@ -49,7 +50,13 @@ type alias Tools =
 
 
 type alias Inputs =
-    List ( Path, BuildTask Tools FatalError FileOrDirectory )
+    { files :
+        List
+            ( Path Path.Relative Path.File
+            , BuildTask FatalError FileOrDirectory
+            )
+    , inputPath : Path Path.Absolute Path.Directory
+    }
 
 
 type ProcessedFile
@@ -64,37 +71,60 @@ type ProcessedFile
 
 type alias HashedFileWith a =
     { a
-        | filename : Path
+        | filename : Path Path.Relative Path.File
         , hash : FileOrDirectory
     }
 
 
-getInputs : { config | inputPath : Path, buildPath : Path, debug : Bool } -> BackendTask FatalError Inputs
+getInputs :
+    { config
+        | inputPath : String
+        , buildPath : String
+        , debug : Bool
+    }
+    -> BackendTask FatalError Inputs
 getInputs config =
-    Glob.fromStringWithOptions
-        (let
-            defaultOptions : Glob.Options
-            defaultOptions =
-                Glob.defaultOptions
-         in
-         { defaultOptions | include = Glob.OnlyFiles }
-        )
-        (Path.toString config.inputPath ++ "/**")
-        |> BackendTask.andThen
-            (\found ->
-                found
-                    |> List.sort
-                    |> List.map Path.path
-                    |> BuildTask.inputs config
-            )
+    let
+        filesTask :
+            BackendTask
+                FatalError
+                (List ( Path Path.Relative Path.File, BuildTask e FileOrDirectory ))
+        filesTask =
+            Glob.fromStringWithOptions
+                (let
+                    defaultOptions : Glob.Options
+                    defaultOptions =
+                        Glob.defaultOptions
+                 in
+                 { defaultOptions | include = Glob.OnlyFiles }
+                )
+                (config.inputPath ++ "/**")
+                |> BackendTask.andThen
+                    (\found ->
+                        found
+                            |> List.sort
+                            |> Result.Extra.combineMap Path.parseRelativeFile
+                            |> Result.mapError
+                                (\e ->
+                                    FatalError.fromString ("Failed to parse input path " ++ Debug.toString e)
+                                )
+                            |> BackendTask.fromResult
+                    )
+                |> BackendTask.andThen (BuildTask.inputs config)
+
+        inputPathTask : BackendTask FatalError (Path Path.Absolute Path.Directory)
+        inputPathTask =
+            BackendTask.File.Extra.resolveDirectory config.inputPath
+    in
+    BackendTask.map2 Inputs filesTask inputPathTask
 
 
 type T4 a b c d
     = T4 a b c d
 
 
-getTools : Build.Config { inputPath : Path } -> inputs -> BuildTask tools FatalError Tools
-getTools _ _ =
+getTools : BuildTask FatalError Tools
+getTools =
     BuildTask.succeed Tools
         |> BuildTask.andMap (BuildTask.which "elm-format")
         |> BuildTask.andMap (BuildTask.which "exiftool")
@@ -103,16 +133,17 @@ getTools _ _ =
         |> BuildTask.andMap (BuildTask.which "magick")
 
 
-buildAction : Build.Config { inputPath : Path } -> Inputs -> BuildTask Tools FatalError FileOrDirectory
-buildAction config inputs =
+buildAction : Inputs -> BuildTask FatalError FileOrDirectory
+buildAction inputs =
     let
         inputSize : Int
         inputSize =
-            List.length inputs
+            List.length inputs.files
     in
+    BuildTask.do getTools <| \tools ->
     BuildTask.do
-        (inputs
-            |> List.indexedMap (processFile config inputSize)
+        (inputs.files
+            |> List.indexedMap (processFile tools inputs inputSize)
             |> BuildTask.combine
             |> BuildTask.map Maybe.Extra.values
         )
@@ -130,10 +161,10 @@ buildAction config inputs =
         imageFiles =
             List.filterMap asImage processedFiles
 
-        publicFolder : BuildTask Tools { fatal : FatalError, recoverable : Script.Error } FileOrDirectory
+        publicFolder : BuildTask { fatal : FatalError, recoverable : Script.Error } FileOrDirectory
         publicFolder =
             Do.writeFile (Font.toCssFile fontFiles) <| \fontsCssHash ->
-            ({ filename = Path.path "fonts.css"
+            ({ filename = Path.parseRelativeFile "fonts.css" |> trustMe
              , hash = fontsCssHash
              }
                 :: List.concatMap processedFileToFileList processedFiles
@@ -142,16 +173,16 @@ buildAction config inputs =
                 |> BuildTask.withPrefix ("[" ++ String.fromInt inputSize ++ "/" ++ String.fromInt inputSize ++ "]")
     in
     Do.map4 T4
-        (imagesElmFile processedFiles)
-        (Elm.codegen (fontsElmFile fontFiles) |> BuildTask.allowFatal)
+        (imagesElmFile tools processedFiles)
+        (Elm.codegen tools (fontsElmFile fontFiles) |> BuildTask.allowFatal)
         (imagesSizesFile imageFiles)
         (publicFolder |> BuildTask.allowFatal)
     <| \(T4 imagesElm fontsElm imageSizes public) ->
     BuildTask.combineInto
-        [ { filename = Path.path "generated/Images.elm", hash = imagesElm }
+        [ { filename = Path.parseRelativeFile "generated/Images.elm" |> trustMe, hash = imagesElm }
         , fontsElm
-        , { filename = Path.path "image-sizes", hash = imageSizes }
-        , { filename = Path.path "public", hash = public }
+        , { filename = Path.parseRelativeFile "image-sizes" |> trustMe, hash = imageSizes }
+        , { filename = Path.parseRelativeFile "public" |> trustMe, hash = public }
         ]
 
 
@@ -192,7 +223,7 @@ imagesSizesFile :
         { a
             | original : HashedFileWith { width : Int, height : Int }
         }
-    -> BuildTask Tools FatalError FileOrDirectory
+    -> BuildTask FatalError FileOrDirectory
 imagesSizesFile processedFiles =
     let
         content : String
@@ -218,20 +249,38 @@ imagesSizesFile processedFiles =
         |> BuildTask.allowFatal
 
 
-fontsElmFile : List (HashedFileWith Font.Data) -> Elm.File
+fontsElmFile :
+    List (HashedFileWith Font.Data)
+    ->
+        { path : Path Path.Relative Path.File
+        , contents : String
+        , warnings :
+            List
+                { declaration : String
+                , warning : String
+                }
+        }
 fontsElmFile files =
-    files
-        |> List.map .family
-        |> List.Extra.unique
-        |> List.map
-            (\family ->
-                Elm.declaration (String.replace " " "_" family) (Gen.Html.Attributes.style "font-family" family)
-            )
-        |> Elm.file [ "Fonts" ]
+    let
+        raw : Elm.File
+        raw =
+            files
+                |> List.map .family
+                |> List.Extra.unique
+                |> List.map
+                    (\family ->
+                        Elm.declaration (String.replace " " "_" family) (Gen.Html.Attributes.style "font-family" family)
+                    )
+                |> Elm.file [ "Fonts" ]
+    in
+    { path = Path.parseRelativeFile raw.path |> trustMe
+    , contents = raw.contents
+    , warnings = raw.warnings
+    }
 
 
-imagesElmFile : List ProcessedFile -> BuildTask Tools FatalError FileOrDirectory
-imagesElmFile list =
+imagesElmFile : Tools -> List ProcessedFile -> BuildTask FatalError FileOrDirectory
+imagesElmFile tools list =
     list
         |> List.filterMap
             (\processedFile ->
@@ -264,32 +313,42 @@ imagesElmFile list =
             encodeProcessedFiles
             (\processedFiles ->
                 let
-                    file : Elm.File
-                    file =
-                        processedFiles
-                            |> List.map
-                                (\processedFile ->
-                                    if processedFile.svg then
-                                        processedSvgToDeclaration processedFile
+                    fromFilesResult : Result () (List Elm.Declaration)
+                    fromFilesResult =
+                        Result.Extra.combineMap
+                            (\processedFile ->
+                                if processedFile.svg then
+                                    processedSvgToDeclaration processedFile
 
-                                    else
-                                        processedImageToDeclaration processedFile
-                                )
-                            |> (::) standardFormats.declaration
-                            |> (::) getSizes_.declaration
-                            |> (::) toSources.declaration
-                            |> (::) (toPicture.declaration |> Elm.expose)
-                            |> Elm.file [ "Images" ]
+                                else
+                                    processedImageToDeclaration processedFile
+                            )
+                            processedFiles
                 in
-                Do.allowFatal (BuildTask.writeFile file.contents) <| \hash ->
-                BuildTask.allowFatal (Elm.format hash)
+                case fromFilesResult of
+                    Ok fromFiles ->
+                        let
+                            file : Elm.File
+                            file =
+                                Elm.expose toPicture.declaration
+                                    :: toSources.declaration
+                                    :: getSizes_.declaration
+                                    :: standardFormats.declaration
+                                    :: fromFiles
+                                    |> Elm.file [ "Images" ]
+                        in
+                        Do.allowFatal (BuildTask.writeFile file.contents) <| \hash ->
+                        BuildTask.allowFatal (Elm.format tools hash)
+
+                    Err _ ->
+                        BuildTask.fail (FatalError.fromString "Failed to process files")
             )
 
 
 encodeProcessedFiles :
     List
         { svg : Bool
-        , filename : Path
+        , filename : Path Path.Relative Path.File
         , hash : FileOrDirectory
         , width : Int
         , height : Int
@@ -310,7 +369,7 @@ encodeProcessedFiles processedFiles =
     { files = files, additionalData = additionalData }
 
 
-processedFileToFileList : ProcessedFile -> List { filename : Path, hash : FileOrDirectory }
+processedFileToFileList : ProcessedFile -> List { filename : Path Path.Relative Path.File, hash : FileOrDirectory }
 processedFileToFileList file =
     let
         extract : HashedFileWith a -> HashedFileWith {}
@@ -334,13 +393,25 @@ processedFileToFileList file =
             [ extract data ]
 
 
-processFile : { config | inputPath : Path } -> Int -> Int -> ( Path, BuildTask Tools FatalError FileOrDirectory ) -> BuildTask Tools FatalError (Maybe ProcessedFile)
-processFile config total index ( path, copyFile ) =
+processFile :
+    Tools
+    -> Inputs
+    -> Int
+    -> Int
+    ->
+        ( Path Path.Relative Path.File
+        , BuildTask FatalError FileOrDirectory
+        )
+    -> BuildTask FatalError (Maybe ProcessedFile)
+processFile tools inputs total index ( path, copyFile ) =
     let
-        relative : Path
+        relative : Path Path.Relative Path.File
         relative =
-            Path.relativeTo config.inputPath path
-                |> Path.replaceAll " " "_"
+            Path.relativeTo inputs.inputPath path
+                |> Path.toString
+                |> String.replace " " "_"
+                |> Path.parseRelativeFile
+                |> trustMe
 
         prefix : String
         prefix =
@@ -350,16 +421,16 @@ processFile config total index ( path, copyFile ) =
                 ++ String.fromInt total
                 ++ "]"
 
-        doImage : () -> BuildTask Tools FatalError (Maybe ProcessedFile)
+        doImage : () -> BuildTask FatalError (Maybe ProcessedFile)
         doImage () =
             BuildTask.do copyFile <| \hash ->
-            BuildTask.do (image relative hash) <| \data ->
+            BuildTask.do (image tools relative hash) <| \data ->
             data
                 |> ProcessedImage
                 |> Just
                 |> BuildTask.succeed
 
-        doSvg : () -> BuildTask Tools FatalError (Maybe ProcessedFile)
+        doSvg : () -> BuildTask FatalError (Maybe ProcessedFile)
         doSvg () =
             BuildTask.do copyFile <| \hash ->
             Do.allowFatal (Image.getSvgSize hash) <| \size ->
@@ -372,10 +443,10 @@ processFile config total index ( path, copyFile ) =
                 |> Just
                 |> BuildTask.succeed
 
-        doFont : () -> BuildTask Tools FatalError (Maybe ProcessedFile)
+        doFont : () -> BuildTask FatalError (Maybe ProcessedFile)
         doFont () =
             BuildTask.do copyFile <| \hash ->
-            Do.allowFatal (Font.parse hash) <| \fontData ->
+            Do.allowFatal (Font.parse tools hash) <| \fontData ->
             { style = fontData.style
             , weight = fontData.weight
             , family = fontData.family
@@ -386,41 +457,41 @@ processFile config total index ( path, copyFile ) =
                 |> Just
                 |> BuildTask.succeed
     in
-    (case Path.extension path of
-        Just "webp" ->
+    (case Path.fileExtension path of
+        Ok "webp" ->
             doImage ()
 
-        Just "jpg" ->
+        Ok "jpg" ->
             doImage ()
 
-        Just "jpeg" ->
+        Ok "jpeg" ->
             doImage ()
 
-        Just "png" ->
+        Ok "png" ->
             doImage ()
 
-        Just "ttf" ->
+        Ok "ttf" ->
             doFont ()
 
-        Just "otf" ->
+        Ok "otf" ->
             doFont ()
 
-        Just "svg" ->
+        Ok "svg" ->
             doSvg ()
 
-        Just "zip" ->
+        Ok "zip" ->
             -- Ignore
             BuildTask.succeed Nothing
 
-        Just "txt" ->
+        Ok "txt" ->
             -- Ignore
             BuildTask.succeed Nothing
 
-        Just "md" ->
+        Ok "md" ->
             -- Ignore
             BuildTask.succeed Nothing
 
-        Just "css" ->
+        Ok "css" ->
             BuildTask.do copyFile <| \hash ->
             BuildTask.succeed (Just (ProcessedCss { filename = relative, hash = hash }))
 
@@ -434,26 +505,41 @@ processFile config total index ( path, copyFile ) =
         |> BuildTask.withPrefix prefix
 
 
+trustMe : Result e v -> v
+trustMe res =
+    case res of
+        Err _ ->
+            let
+                _ =
+                    -- Crash
+                    modBy 0 0
+            in
+            trustMe res
+
+        Ok v ->
+            v
+
+
 {-| Convert an image to jxl, avif, webp, jpg, and scale it down up to 50px.
 -}
 image :
-    Path
+    Tools
+    -> Path Path.Relative Path.File
     -> FileOrDirectory
     ->
         BuildTask
-            Tools
             FatalError
-            { original : { width : Int, height : Int, filename : Path, hash : FileOrDirectory }
+            { original : { width : Int, height : Int, filename : Path Path.Relative Path.File, hash : FileOrDirectory }
             , converted : List (HashedFileWith { width : Int })
             }
-image relative copied =
-    case Path.extension relative of
-        Nothing ->
+image tools relative copied =
+    case Path.fileExtension relative of
+        Err _ ->
             BuildTask.fail (FatalError.fromString ("Missing extension in " ++ Path.toString relative))
 
-        Just originalExtension ->
+        Ok originalExtension ->
             let
-                parseSizeFile : String -> BuildTask Tools FatalError { width : Int, height : Int, sizes : List Int }
+                parseSizeFile : String -> BuildTask FatalError { width : Int, height : Int, sizes : List Int }
                 parseSizeFile sizeString =
                     case String.split " " sizeString |> List.map String.toInt of
                         [ Just width, Just height ] ->
@@ -484,9 +570,9 @@ image relative copied =
                         , sizes : List Int
                         }
                     -> { a | extension : String }
-                    -> BuildTask Tools FatalError (List (HashedFileWith { width : Int }))
+                    -> BuildTask FatalError (List (HashedFileWith { width : Int }))
                 convertAndResize stripped sizeData { extension } =
-                    convertTo extension ( stripped, originalExtension ) <| \converted ->
+                    convertTo tools extension ( stripped, originalExtension ) <| \converted ->
                     BuildTask.each sizeData.sizes (doResize converted sizeData extension)
 
                 doResize :
@@ -498,32 +584,36 @@ image relative copied =
                         }
                     -> String
                     -> Int
-                    -> BuildTask Tools FatalError (HashedFileWith { width : Int })
+                    -> BuildTask FatalError (HashedFileWith { width : Int })
                 doResize input sizeData newExtension newWidth =
                     (if newWidth == sizeData.width then
                         BuildTask.succeed input
 
                      else
-                        Unsafe.pipeThrough .magick [ "-", "-resize", String.fromInt newWidth ++ "x" ++ String.fromInt sizeData.height, "-" ] input
+                        Unsafe.pipeThrough tools.magick [ "-", "-resize", String.fromInt newWidth ++ "x" ++ String.fromInt sizeData.height, "-" ] input
                             |> BuildTask.allowFatal
                     )
                         |> BuildTask.map
                             (\resized ->
                                 { width = newWidth
                                 , filename =
-                                    let
-                                        convertedFilename : Path
-                                        convertedFilename =
-                                            Path.replaceExtensionWith newExtension relative
-                                    in
-                                    convertedFilename
-                                        |> Path.appendToFilename ("-" ++ String.fromInt newWidth)
+                                    Path.splitExtension relative
+                                        |> trustMe
+                                        |> (\( base, ext ) ->
+                                                Path.toString base
+                                                    ++ "-"
+                                                    ++ String.fromInt newWidth
+                                                    ++ "."
+                                                    ++ newExtension
+                                           )
+                                        |> Path.parseRelativeFile
+                                        |> trustMe
                                 , hash = resized
                                 }
                             )
             in
-            Do.allowFatal (Image.stripMetadata copied) <| \stripped ->
-            Do.allowFatal (Image.getSize stripped) <| \sizeFile ->
+            Do.allowFatal (Image.stripMetadata tools copied) <| \stripped ->
+            Do.allowFatal (Image.getSize tools stripped) <| \sizeFile ->
             Do.allowFatal (BuildTask.withFile sizeFile BuildTask.succeed) <| \sizeFileContent ->
             BuildTask.do (parseSizeFile sizeFileContent) <| \sizeData ->
             Do.each standardFormats.list (convertAndResize stripped sizeData) <| \converted ->
@@ -588,16 +678,17 @@ getSizes_ =
 
 
 convertTo :
-    String
+    Tools
+    -> String
     -> ( FileOrDirectory, String )
-    -> (FileOrDirectory -> BuildTask Tools FatalError a)
-    -> BuildTask Tools FatalError a
-convertTo format ( cached, originalExtension ) k =
+    -> (FileOrDirectory -> BuildTask FatalError a)
+    -> BuildTask FatalError a
+convertTo tools format ( cached, originalExtension ) k =
     if originalExtension == format then
         k cached
 
     else
-        BuildTask.allowFatal (Unsafe.pipeThrough .magick [ "-", format ++ ":-" ] cached)
+        BuildTask.allowFatal (Unsafe.pipeThrough tools.magick [ "-", format ++ ":-" ] cached)
             |> BuildTask.andThen k
 
 
@@ -639,116 +730,99 @@ standardFormats =
 
 processedImageToDeclaration :
     HashedFileWith { a | width : Int, height : Int }
-    -> Elm.Declaration
+    -> Result () Elm.Declaration
 processedImageToDeclaration original =
     let
-        name : String
-        name =
-            toVariableName original.filename
-
         attrsAnnotation : Elm.Annotation.Annotation
         attrsAnnotation =
             Elm.Annotation.list (Gen.Html.annotation_.attribute (Elm.Annotation.var "msg"))
     in
-    Elm.declaration name
-        (Elm.fn
-            (Elm.Arg.varWith "attrs" attrsAnnotation)
-            (\attrs ->
-                let
-                    dir : String
-                    dir =
-                        Path.toString (Path.directory original.filename)
-                in
-                toPicture.call attrs
-                    (Elm.string
-                        (if String.isEmpty dir then
-                            Path.filenameWithoutExtension original.filename
-
-                         else
-                            dir ++ "/" ++ Path.filenameWithoutExtension original.filename
+    Result.map2
+        (\name ( pathWithoutExtension, extension ) ->
+            Elm.declaration name
+                (Elm.fn
+                    (Elm.Arg.varWith "attrs" attrsAnnotation)
+                    (\attrs ->
+                        toPicture.call attrs
+                            (Elm.string
+                                (Path.toString
+                                    pathWithoutExtension
+                                )
+                            )
+                            (Elm.string extension)
+                            (Elm.int original.width)
+                            (Elm.int original.height)
+                    )
+                    |> Elm.withType Elm.Annotation.unit
+                    |> Elm.withType
+                        (Elm.Annotation.function
+                            [ attrsAnnotation ]
+                            (Gen.Html.annotation_.html (Elm.Annotation.var "msg"))
                         )
-                    )
-                    (Path.extension original.filename
-                        |> Maybe.withDefault ""
-                        |> Elm.string
-                    )
-                    (Elm.int original.width)
-                    (Elm.int original.height)
-            )
-            |> Elm.withType Elm.Annotation.unit
-            |> Elm.withType
-                (Elm.Annotation.function
-                    [ attrsAnnotation ]
-                    (Gen.Html.annotation_.html (Elm.Annotation.var "msg"))
                 )
+                |> Elm.expose
         )
-        |> Elm.expose
+        (toVariableName original.filename)
+        (Path.splitExtension original.filename)
 
 
 processedSvgToDeclaration :
     HashedFileWith { a | width : Int, height : Int }
-    -> Elm.Declaration
+    -> Result () Elm.Declaration
 processedSvgToDeclaration original =
-    let
-        name : String
-        name =
-            toVariableName original.filename
-
-        attrsAnnotation : Elm.Annotation.Annotation
-        attrsAnnotation =
-            Elm.Annotation.list (Gen.Html.annotation_.attribute (Elm.Annotation.var "msg"))
-    in
-    Elm.declaration name
-        (Elm.fn
-            (Elm.Arg.varWith "attrs" attrsAnnotation)
-            (\attrs ->
-                Gen.Html.call_.img
-                    (Elm.Op.cons (Gen.Html.Attributes.src (Path.toString original.filename))
-                        (Elm.Op.cons (Gen.Html.Attributes.width original.width)
-                            (Elm.Op.cons (Gen.Html.Attributes.height original.height)
-                                attrs
-                            )
+    toVariableName original.filename
+        |> Result.map
+            (\name ->
+                let
+                    attrsAnnotation : Elm.Annotation.Annotation
+                    attrsAnnotation =
+                        Elm.Annotation.list (Gen.Html.annotation_.attribute (Elm.Annotation.var "msg"))
+                in
+                Elm.declaration name
+                    (Elm.fn
+                        (Elm.Arg.varWith "attrs" attrsAnnotation)
+                        (\attrs ->
+                            Gen.Html.call_.img
+                                (Elm.Op.cons (Gen.Html.Attributes.src (Path.toString original.filename))
+                                    (Elm.Op.cons (Gen.Html.Attributes.width original.width)
+                                        (Elm.Op.cons (Gen.Html.Attributes.height original.height)
+                                            attrs
+                                        )
+                                    )
+                                )
+                                (Elm.list [])
                         )
+                        |> Elm.withType
+                            (Elm.Annotation.function
+                                [ attrsAnnotation ]
+                                (Gen.Html.annotation_.html (Elm.Annotation.var "msg"))
+                            )
                     )
-                    (Elm.list [])
+                    |> Elm.expose
             )
-            |> Elm.withType
-                (Elm.Annotation.function
-                    [ attrsAnnotation ]
-                    (Gen.Html.annotation_.html (Elm.Annotation.var "msg"))
-                )
-        )
-        |> Elm.expose
 
 
-toVariableName : Path -> String
+toVariableName : Path Path.Relative Path.File -> Result () String
 toVariableName path =
-    let
-        dir : String
-        dir =
-            Path.toString (Path.directory path)
+    Path.splitExtension path
+        |> Result.map
+            (\( nameWithoutExtension, _ ) ->
+                let
+                    stripLeadingUnderscores i =
+                        if String.startsWith "_" i then
+                            stripLeadingUnderscores (String.dropLeft 1 i)
 
-        nameWithoutExtension : String
-        nameWithoutExtension =
-            if String.isEmpty dir then
-                Path.filenameWithoutExtension path
-
-            else
-                dir ++ "/" ++ Path.filenameWithoutExtension path
-
-        stripLeadingUnderscores i =
-            if String.startsWith "_" i then
-                stripLeadingUnderscores (String.dropLeft 1 i)
-
-            else
-                i
-    in
-    nameWithoutExtension
-        |> String.replace "/" "_"
-        |> String.replace " " "_"
-        |> String.replace "-" "_"
-        |> stripLeadingUnderscores
-        |> String.Extra.decapitalize
+                        else
+                            i
+                in
+                nameWithoutExtension
+                    |> Path.toString
+                    |> String.replace "/" "_"
+                    |> String.replace " " "_"
+                    |> String.replace "-" "_"
+                    |> stripLeadingUnderscores
+                    |> String.Extra.decapitalize
+            )
 
 
 toSources : Elm.Declare.Function (Elm.Expression -> Elm.Expression -> Elm.Expression -> Elm.Expression)

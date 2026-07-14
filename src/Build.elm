@@ -2,9 +2,9 @@ module Build exposing (BuildFile, Config, HashKind, customProgramConfig, program
 
 import Ansi.Color
 import BackendTask exposing (BackendTask)
-import BackendTask.Customs
 import BackendTask.Do as Do
 import BackendTask.Extra
+import BackendTask.File.Extra
 import BackendTask.Time
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import Cli.Option as Option
@@ -15,7 +15,7 @@ import FastSet as Set exposing (Set)
 import FatalError exposing (FatalError)
 import Hash
 import Pages.Script as Script
-import Path exposing (Path)
+import Path.Posix as Path exposing (Path)
 import Time
 
 
@@ -25,8 +25,8 @@ type HashKind
 
 type alias Config custom =
     { custom
-        | buildPath : Path
-        , outputName : Path
+        | buildPath : String
+        , outputName : String
         , jobs : Maybe Int
         , removeStale : Bool
         , check : Bool
@@ -37,10 +37,9 @@ type alias Config custom =
 
 
 {-| -}
-type alias BuildFile customConfig inputs tools =
+type alias BuildFile customConfig inputs =
     { getInputs : Config customConfig -> BackendTask FatalError inputs
-    , getTools : Config customConfig -> inputs -> BuildTask () FatalError tools
-    , buildAction : Config customConfig -> inputs -> BuildTask tools FatalError FileOrDirectory
+    , buildAction : inputs -> BuildTask FatalError FileOrDirectory
     }
 
 
@@ -63,7 +62,9 @@ programConfig =
     customProgramConfig (OptionsParser.build identity)
 
 
-customProgramConfig : OptionsParser (Config {} -> Config customConfig) BuilderState.AnyOptions -> Program.Config (Config customConfig)
+customProgramConfig :
+    OptionsParser (Config {} -> Config customConfig) BuilderState.AnyOptions
+    -> Program.Config (Config customConfig)
 customProgramConfig optionsParser =
     Program.config
         |> Program.add
@@ -83,13 +84,11 @@ customProgramConfig optionsParser =
                     )
                 |> OptionsParser.with
                     (Option.requiredKeywordArg "build"
-                        |> Option.map Path.path
                         |> Option.withDisplayName "dir"
                         |> Option.withDescription "Build directory - contains the intermediate files"
                     )
                 |> OptionsParser.with
                     (Option.requiredKeywordArg "output"
-                        |> Option.map Path.path
                         |> Option.withDisplayName "dir"
                         |> Option.withDescription "Output directory"
                     )
@@ -132,14 +131,16 @@ customProgramConfig optionsParser =
             )
 
 
-toTask : BuildFile customConfig inputs tools -> Config customConfig -> BackendTask FatalError ()
+toTask : BuildFile customConfig inputs -> Config customConfig -> BackendTask FatalError ()
 toTask buildFile config =
     BackendTask.Extra.profiling "main" <|
         Do.do BackendTask.Time.now <| \begin ->
         Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Getting inputs") <| \_ ->
         Do.do (buildFile.getInputs config) <| \inputs ->
         Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Processing inputs") <| \_ ->
-        Do.exec "mkdir" [ "-p", Path.toString config.buildPath ] <| \_ ->
+        Do.exec "mkdir" [ "-p", config.buildPath ] <| \_ ->
+        Do.do (BackendTask.File.Extra.resolveDirectory config.buildPath) <| \buildPath ->
+        Do.do (BackendTask.File.Extra.resolveFile config.outputName) <| \outputName ->
         Do.do
             (BuildTask.run
                 { jobs = config.jobs
@@ -152,28 +153,27 @@ toTask buildFile config =
                     in
                     kind
                 , keepFailed = config.keepFailed
-                , getTools = buildFile.getTools config inputs
                 }
-                config.buildPath
-                (buildFile.buildAction config inputs)
+                buildPath
+                (buildFile.buildAction inputs)
                 |> BackendTask.mapError buildErrorToFatalError
             )
         <| \combined ->
         Do.do
-            (Script.removeFile (Path.toString config.outputName)
+            (BackendTask.File.Extra.removeIfExists outputName
                 |> BackendTask.onError (\_ -> BackendTask.succeed ())
             )
         <| \_ ->
         symlink
-            { source = config.outputName
+            { source = outputName
             , target =
                 Path.relativeTo
-                    (Path.directory config.outputName)
+                    (Path.parent outputName)
                     combined.output
             }
         <| \_ ->
         Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Output: " ++ Path.toString combined.output) <| \_ ->
-        Do.do (BackendTask.Customs.readdir config.buildPath) <| \actualList ->
+        Do.do (BackendTask.File.Extra.listFilesAndDirectoriesIn buildPath) <| \( existingFiles, existingDirectories ) ->
         let
             expected : Set String
             expected =
@@ -183,8 +183,9 @@ toTask buildFile config =
 
             actual : Set String
             actual =
-                actualList
-                    |> List.map (\file -> Path.toString config.buildPath ++ "/" ++ file)
+                (List.map (\file -> Path.toString (Path.append buildPath file)) existingFiles
+                    ++ List.map (\directory -> Path.toString (Path.append buildPath directory)) existingDirectories
+                )
                     |> Set.fromList
 
             unexpected : Set String
@@ -264,6 +265,9 @@ timeToString ms =
         String.fromInt ms ++ "ms"
 
 
-symlink : { source : Path, target : Path } -> (() -> BackendTask FatalError a) -> BackendTask FatalError a
+symlink :
+    { source : Path base Path.File, target : Path base2 kind }
+    -> (() -> BackendTask FatalError a)
+    -> BackendTask FatalError a
 symlink { source, target } k =
     Do.do (Script.exec "ln" [ "-s", Path.toString target, Path.toString source ]) k

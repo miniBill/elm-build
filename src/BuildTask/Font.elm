@@ -5,7 +5,7 @@ import BackendTask.Stream as Stream
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import BuildTask.Unsafe as Unsafe
 import FatalError exposing (FatalError)
-import Path exposing (Path)
+import Path.Posix as Path exposing (Path)
 import String.Multiline
 import Utils
 
@@ -79,10 +79,10 @@ weightToNumber weight =
             900
 
 
-parse : FileOrDirectory -> BuildTask { a | fc_scan : BuildTask.Command } { recoverable : FontError, fatal : FatalError } Data
-parse hash =
+parse : { tools | fc_scan : BuildTask.Command } -> FileOrDirectory -> BuildTask { recoverable : FontError, fatal : FatalError } Data
+parse { fc_scan } hash =
     let
-        readFontData : String -> BuildTask t { fatal : FatalError, recoverable : FontError } Data
+        readFontData : String -> BuildTask { fatal : FatalError, recoverable : FontError } Data
         readFontData familyAndStyle =
             case String.split " || " familyAndStyle of
                 [ family, styleAndWeight ] ->
@@ -105,7 +105,7 @@ parse hash =
                         (FailedToParseFamilyAndStyle familyAndStyle)
                         |> BuildTask.fail
     in
-    BuildTask.doWithError (Unsafe.commandWithFile .fc_scan [ "--format", "%{family[0]} || %{style[0]}" ] hash) FailedToRunFcScan <| \familyAndStyleFile ->
+    BuildTask.doWithError (Unsafe.commandWithFile fc_scan [ "--format", "%{family[0]} || %{style[0]}" ] hash) FailedToRunFcScan <| \familyAndStyleFile ->
     BuildTask.doWithError (BuildTask.withFile familyAndStyleFile BuildTask.succeed) FailedToReadFile <| \familyAndStyle ->
     readFontData familyAndStyle
 
@@ -180,7 +180,7 @@ toCssFile :
             | family : String
             , style : Style
             , weight : Weight
-            , filename : Path
+            , filename : Path Path.Relative Path.File
         }
     -> String
 toCssFile files =
