@@ -453,22 +453,27 @@ isPrefixOf (Path child) (Path base) =
 
 relativeTo : Path base Directory -> Path base fileOrDirectory -> Path Relative fileOrDirectory
 relativeTo (Path base) (Path fileOrDirectory) =
+    Path (relativeToHelp base fileOrDirectory)
+
+
+relativeToHelp : List String -> List String -> List String
+relativeToHelp base fileOrDirectory =
     case ( base, fileOrDirectory ) of
         ( [], _ ) ->
-            Debug.todo ("Path.relativeTo " ++ toString (Path base) ++ " " ++ toString (Path fileOrDirectory))
+            fileOrDirectory
 
         ( _, [] ) ->
-            Debug.todo ("Path.relativeTo " ++ toString (Path base) ++ " " ++ toString (Path fileOrDirectory))
+            List.repeat (List.length base) ".."
 
         ( [ "" ], _ ) ->
-            Path fileOrDirectory
+            fileOrDirectory
 
         ( baseHead :: baseTail, fileHead :: fileTail ) ->
             if baseHead == fileHead then
-                relativeTo (Path baseTail) (Path fileTail)
+                relativeToHelp baseTail fileTail
 
             else
-                Debug.todo ("Path.relativeTo " ++ toString (Path base) ++ " " ++ toString (Path fileOrDirectory))
+                List.repeat (List.length base) ".." ++ fileOrDirectory
 
 
 splitAndNormalize : String -> List String
