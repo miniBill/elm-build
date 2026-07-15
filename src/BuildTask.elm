@@ -303,10 +303,10 @@ combineInto : List { filename : Path Path.Relative Path.File, hash : FileOrDirec
 combineInto files =
     files
         |> buildTree
-        |> combineTree
+        |> andThen combineTree
 
 
-buildTree : List { filename : Path Path.Relative Path.File, hash : FileOrDirectory } -> Tree
+buildTree : List { filename : Path Path.Relative Path.File, hash : FileOrDirectory } -> BuildTask e Tree
 buildTree files =
     let
         emptyTree : Tree
@@ -355,8 +355,60 @@ buildTree files =
                                 )
                                 tree.directories
                         }
+
+        result : Tree
+        result =
+            List.foldl addFile emptyTree files
     in
-    List.foldl addFile emptyTree files
+    isDebug
+        |> andThen
+            (\debug ->
+                if debug then
+                    dumpTree result
+
+                else
+                    succeed result
+            )
+
+
+dumpTree : Tree -> BuildTask e Tree
+dumpTree tree =
+    triggerDebugger
+        |> andThen
+            (\_ ->
+                dumpTreeHelp "-" tree
+            )
+
+
+dumpTreeHelp : String -> Tree -> BuildTask e Tree
+dumpTreeHelp prefix (Tree tree) =
+    let
+        directoriesLogs : List (BuildTask e ())
+        directoriesLogs =
+            tree.directories
+                |> PathDict.toList
+                |> List.map
+                    (\( directory, child ) ->
+                        Internal.debugLog (prefix ++ Path.toString directory)
+                            |> andThen (\_ -> dumpTreeHelp (prefix ++ "-") child)
+                            |> map (\_ -> ())
+                    )
+
+        filesLogs : String
+        filesLogs =
+            tree.files
+                |> PathDict.toList
+                |> List.map (\( file, _ ) -> Path.toString file)
+                |> String.join ", "
+    in
+    (directoriesLogs ++ [ Internal.debugLog (prefix ++ filesLogs) ])
+        |> Internal.combineBy 1
+        |> map (\_ -> Tree tree)
+
+
+isDebug : BuildTask e Bool
+isDebug =
+    Internal.isDebug
 
 
 combineTree : Tree -> BuildTask e FileOrDirectory
