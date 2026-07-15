@@ -24,6 +24,7 @@ export async function writeBinaryFile({ path, body }, { cwd }) {
  * @returns {Promise<{ files : string[]; directories: string[]; }>}
  */
 export async function readdir(path) {
+    debugger;
     let list = await fs.readdir(path, { withFileTypes: true });
     let files = [];
     let directories = [];
@@ -34,6 +35,7 @@ export async function readdir(path) {
             files.push(dirent.name);
         }
     }
+    return { files, directories };
 }
 
 /**

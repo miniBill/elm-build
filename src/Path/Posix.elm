@@ -3,13 +3,13 @@ module Path.Posix exposing
     , Absolute, Relative, AbsoluteOrRelative
     , File, Directory, FileOrDirectory
     , AbsoluteOrRelativePath(..)
-    , append, stripProperPrefix, isProperPrefixOf, replaceProperPrefix, parent, filename, dirname, addExtension, splitExtension, fileExtension, replaceExtension, mapAbsoluteOrRelative, extractAbsoluteOrRelative
-    , parseAbsoluteDirectory, parseRelativeDirectory, parseAbsoluteFile, parseRelativeFile, parseAbsoluteFileOrDirectory, parseRelativeFileOrDirectory
+    , append, parent, filename, dirname, splitExtension, fileExtension, replaceExtension, mapAbsoluteOrRelative, extractAbsoluteOrRelative
+    , parseAbsoluteDirectory, parseRelativeDirectory, parseAbsoluteFile, parseRelativeFile, parseRelativeFileOrDirectory
     , toString, absoluteDirectoryToString, relativeDirectoryToString, absoluteFileToString, relativeFileToString
     , relativeTo, splitDirectory, toFileOrDirectory
     )
 
-{-| Module for handling paths. The implementation is based on [path](https://hackage.haskell.org/package/path).
+{-| Module for handling paths. The API is inspired by [path](https://hackage.haskell.org/package/path).
 
 
 ## Types
@@ -22,7 +22,7 @@ module Path.Posix exposing
 
 ## Operations
 
-@docs append, stripProperPrefix, isProperPrefixOf, replaceProperPrefix, parent, filename, dirname, addExtension, splitExtension, fileExtension, replaceExtension, mapAbsoluteOrRelative, extractAbsoluteOrRelative
+@docs append, replaceProperPrefix, parent, filename, dirname, splitExtension, fileExtension, replaceExtension, mapAbsoluteOrRelative, extractAbsoluteOrRelative
 
 
 ## Parsing
@@ -68,8 +68,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 -}
 
 import List.Extra
-import Path.Utils as Utils
-import Result.Extra
 
 
 {-| Path of some base and type.
@@ -79,18 +77,20 @@ The type variables are:
   - `base` - the base location of the path; absolute or relative;
   - `kind` - whether file or directory.
 
-Internally is a string. The string can be of two formats only:
+Internally is a list of strings. The string can be of two formats only:
 
 1.  file format: file.txt, foo/bar.txt, /foo/bar.txt;
 2.  directory format: foo/, /foo/bar/.
 
-All directories end in a trailing separator. There are no duplicate path separators //, no .., no ./, no ~/, etc.
-
-To handle `..` and `~` you can use `resolveFile` / `resolveDirectory`.
+All directories end in a trailing separator. There are no duplicate path separators //, no ./, no ~/, etc.
 
 -}
-type Path base kind
-    = Path String
+type
+    Path base kind
+    -- A directory will always end with ""
+    -- `/` is [ "", "" ]
+    -- `.` is [ "" ]
+    = Path (List String)
 
 
 {-| An absolute path.
@@ -99,7 +99,7 @@ type Absolute
     = Absolute_
 
 
-{-| A relative path; one without a root. Note that a `..` path component to represent the parent directory is not allowed by this library.
+{-| A relative path; one without a root.
 -}
 type Relative
     = Relative_
@@ -140,71 +140,20 @@ type AbsoluteOrRelativePath kind
 -}
 append : Path base Directory -> Path Relative kind -> Path base kind
 append (Path l) (Path r) =
-    Path (l ++ r)
-
-
-type StripProperPrefixError
-    = NotAProperPrefix
-
-
-stripProperPrefix : Path base Directory -> Path base kind -> Result StripProperPrefixError (Path Relative kind)
-stripProperPrefix (Path base) (Path child) =
-    if String.startsWith base child then
-        let
-            stripped =
-                String.dropLeft (String.length base) child
-        in
-        if String.isEmpty stripped then
-            Err NotAProperPrefix
-
-        else
-            Ok (Path stripped)
-
-    else
-        Err NotAProperPrefix
-
-
-isProperPrefixOf : Path base Directory -> Path base kind -> Bool
-isProperPrefixOf p l =
-    Result.Extra.isOk (stripProperPrefix p l)
-
-
-replaceProperPrefix :
-    Path prefixedBase Directory
-    -> Path base Directory
-    -> Path prefixedBase kind
-    -> Result StripProperPrefixError (Path base kind)
-replaceProperPrefix src dst fp =
-    Result.map (append dst) (stripProperPrefix src fp)
-
-
-type AddExtensionError
-    = InvalidExtension
-
-
-addExtension : String -> Path base File -> Result AddExtensionError (Path base File)
-addExtension ext (Path path) =
-    case String.toList ext of
-        '.' :: xs ->
-            if List.isEmpty xs || List.member '/' xs || List.all ((==) '.') xs then
-                Err InvalidExtension
-
-            else
-                case parseRelativeFile ext of
-                    Nothing ->
-                        Err InvalidExtension
-
-                    Just _ ->
-                        Ok (Path (path ++ ext))
-
-        _ ->
-            Err InvalidExtension
+    (l ++ r)
+        |> normalize
+        |> Path
 
 
 {-| -}
 toString : Path base kind -> String
 toString (Path p) =
-    p
+    case p of
+        [ "" ] ->
+            "./"
+
+        o ->
+            String.join "/" o
 
 
 {-| Specialized version of `toString`. You can use it to make code more explicit and add further compile-time checks.
@@ -237,45 +186,47 @@ relativeFileToString p =
 
 parseAbsoluteDirectory : String -> Maybe (Path Absolute Directory)
 parseAbsoluteDirectory filepath =
-    if
-        Utils.isAbsolute filepath
-            && not (Utils.hasParentDirectory filepath)
-            && Utils.isValid filepath
-    then
-        Just (Path (normalizeDirectory filepath))
+    if String.startsWith "/" filepath && isValid filepath then
+        (splitAndNormalize filepath ++ [ "" ])
+            |> Path
+            |> Just
 
     else
         Nothing
 
 
-normalizeDirectory : String -> String
-normalizeDirectory path =
-    let
-        -- Represent a "." in relative dir path as "" internally so that it
-        -- composes without having to renormalize the path.
-        normalizeRelDir : String -> String
-        normalizeRelDir p =
-            case p of
-                "./" ->
-                    ""
-
-                _ ->
-                    p
-    in
-    path
-        |> normalizeFilePath
-        |> Utils.addTrailingPathSeparator
-        |> normalizeRelDir
-
-
 parseRelativeDirectory : String -> Maybe (Path Relative Directory)
-parseRelativeDirectory p =
-    Debug.todo "Path.parseRelativeDirectory"
+parseRelativeDirectory filepath =
+    if not (String.startsWith "/" filepath) && isValid filepath then
+        (splitAndNormalize filepath ++ [ "" ])
+            |> Path
+            |> Just
+
+    else
+        Nothing
+
+
+isValid : String -> Bool
+isValid filepath =
+    not (String.isEmpty filepath) && not (String.contains "\u{0000}" filepath)
 
 
 parseAbsoluteFile : String -> Maybe (Path Absolute File)
-parseAbsoluteFile p =
-    Debug.todo "Path.parseAbsoluteFile"
+parseAbsoluteFile filepath =
+    if
+        String.startsWith "/" filepath
+            && not (String.endsWith "/" filepath)
+            && not (String.endsWith "/." filepath)
+            && not (String.endsWith "/.." filepath)
+            && isValid filepath
+    then
+        filepath
+            |> splitAndNormalize
+            |> Path
+            |> Just
+
+    else
+        Nothing
 
 
 {-| Convert a relative path to a normalized relative file `Path`.
@@ -289,93 +240,160 @@ Returns `Nothing` when the supplied path:
   - is a directory path i.e.
       - has a trailing path separator
       - is `.` or ends in `/.`
-
-  - contains a `..` path component representing the parent directory
+      - is `..` or ends in `/..`
 
   - is not a valid path (See 'FilePath.isValid')
 
 -}
 parseRelativeFile : String -> Maybe (Path Relative File)
 parseRelativeFile filepath =
-    if validRelFile filepath then
-        normalizeFilePath filepath
-            |> Path
-            |> Just
+    if
+        not (String.startsWith "/" filepath)
+            && (filepath /= ".")
+            && (filepath /= "..")
+            && not (String.endsWith "/" filepath)
+            && not (String.endsWith "/." filepath)
+            && not (String.endsWith "/.." filepath)
+            && isValid filepath
+    then
+        case splitAndNormalize filepath of
+            [ "" ] ->
+                Nothing
+
+            normalized ->
+                case List.Extra.last normalized of
+                    Just "." ->
+                        Nothing
+
+                    Just ".." ->
+                        Nothing
+
+                    _ ->
+                        Just (Path normalized)
 
     else
         Nothing
 
 
-{-| Is the string a valid relative file?
--}
-validRelFile : String -> Bool
-validRelFile filepath =
-    not (String.isEmpty filepath)
-        && not (Utils.isAbsolute filepath)
-        && not (Utils.hasTrailingPathSeparator filepath)
-        && not (Utils.hasParentDirectory filepath)
-        && (filepath /= ".")
-        && Utils.isValid filepath
-
-
-normalizeFilePath : String -> String
-normalizeFilePath path =
-    path
-        |> Utils.normalise
-        |> String.toList
-        |> normalizeLeadingSeps
-
-
-normalizeLeadingSeps : List Char -> String
-normalizeLeadingSeps path =
-    let
-        ( leadingSeps, rest ) =
-            List.Extra.span Utils.isPathSeparator path
-
-        normLeadingSep =
-            String.repeat (min 1 (List.length leadingSeps)) "/"
-    in
-    normLeadingSep ++ String.fromList rest
-
-
-parseAbsoluteFileOrDirectory : String -> Maybe (Path Absolute FileOrDirectory)
-parseAbsoluteFileOrDirectory p =
-    Debug.todo "Path.parseAbsoluteFileOrDirectory"
-
-
 parseRelativeFileOrDirectory : String -> Maybe (Path Relative FileOrDirectory)
-parseRelativeFileOrDirectory p =
-    Debug.todo "Path.parseRelativeFileOrDirectory"
+parseRelativeFileOrDirectory path =
+    case parseRelativeFile path of
+        Just (Path p) ->
+            Just (Path p)
+
+        Nothing ->
+            case parseRelativeDirectory path of
+                Just (Path p) ->
+                    Just (Path p)
+
+                Nothing ->
+                    Nothing
 
 
 parent : Path base kind -> Path base Directory
 parent (Path p) =
-    Debug.todo "Path.parent"
+    case p of
+        [ "" ] ->
+            -- `.`
+            Path [ ".." ]
+
+        [ "", "" ] ->
+            -- `/`
+            Path p
+
+        _ ->
+            normalize (p ++ [ ".." ])
+                |> Path
 
 
 filename : Path base File -> Path Relative File
 filename (Path p) =
-    Debug.todo "Path.filename"
+    case List.Extra.last p of
+        Nothing ->
+            -- Impossible
+            Path []
+
+        Just name ->
+            Path [ name ]
 
 
 dirname : Path base Directory -> Path Relative Directory
 dirname (Path p) =
-    Debug.todo "Path.dirname"
+    case List.Extra.last (List.Extra.removeWhen String.isEmpty p) of
+        Nothing ->
+            -- /
+            Path [ "", "" ]
+
+        Just name ->
+            Path [ name ]
 
 
 fileExtension : Path base File -> Maybe String
 fileExtension (Path p) =
-    Debug.todo "Path.fileExtension"
+    case List.Extra.last p of
+        Nothing ->
+            -- Impossible
+            Nothing
+
+        Just name ->
+            name
+                |> String.split "."
+                |> List.reverse
+                |> List.take 1
+                |> String.concat
+                |> Just
 
 
 replaceExtension : String -> Path base File -> Maybe (Path base File)
 replaceExtension ext (Path p) =
-    Debug.todo "Path.replaceExtension"
+    case List.reverse p of
+        [] ->
+            -- Impossible
+            Nothing
+
+        file :: reversePath ->
+            let
+                replaced : String
+                replaced =
+                    file
+                        |> String.split "."
+                        |> List.reverse
+                        |> List.drop 1
+                        |> (::) ext
+                        |> List.reverse
+                        |> String.join "."
+            in
+            (replaced :: reversePath)
+                |> List.reverse
+                |> Path
+                |> Just
 
 
 splitExtension : Path base File -> Maybe ( Path base File, String )
 splitExtension (Path p) =
-    Debug.todo "Path.splitExtension"
+    case List.reverse p of
+        [] ->
+            -- Impossible
+            Nothing
+
+        file :: reversePath ->
+            let
+                ( reverseFilename, ext ) =
+                    file
+                        |> String.split "."
+                        |> List.reverse
+                        |> List.Extra.splitAt 1
+
+                replaced : String
+                replaced =
+                    reverseFilename
+                        |> List.reverse
+                        |> String.join "."
+            in
+            Just
+                ( Path (List.reverse (replaced :: reversePath))
+                , String.concat ext
+                )
 
 
 {-| Helper to apply a function to an `AbsoluteOrRelativePath` value.
@@ -437,3 +455,53 @@ toFileOrDirectory (Path p) =
 relativeTo : Path base Directory -> Path base2 fileOrDirectory -> Path Relative fileOrDirectory
 relativeTo base fileOrDirectory =
     Debug.todo ("Path.relativeTo " ++ toString base ++ " " ++ toString fileOrDirectory)
+
+
+splitAndNormalize : String -> List String
+splitAndNormalize filepath =
+    String.split "/" filepath
+        |> normalize
+
+
+normalize : List String -> List String
+normalize splat =
+    splat
+        |> List.foldl
+            (\segment ( isFirst, acc ) ->
+                case segment of
+                    "" ->
+                        ( False
+                        , if isFirst then
+                            [ "" ]
+
+                          else
+                            acc
+                        )
+
+                    "." ->
+                        ( False, acc )
+
+                    ".." ->
+                        ( False
+                        , case acc of
+                            [ "" ] ->
+                                -- /..
+                                [ "" ]
+
+                            [] ->
+                                -- ../
+                                [ segment ]
+
+                            ".." :: _ ->
+                                segment :: acc
+
+                            _ :: tail ->
+                                tail
+                        )
+
+                    _ ->
+                        ( False, segment :: acc )
+            )
+            ( True, [] )
+        |> Tuple.second
+        |> List.reverse
