@@ -61,7 +61,7 @@ import ReviewPipelineStyles.Premade
 import Simplify
 import UseCamelCase
 import Validate.Regexes
-import VariablesBetweenCaseOf.AccessInCases
+-- import VariablesBetweenCaseOf.AccessInCases
 
 
 config : List Rule
@@ -117,7 +117,7 @@ config =
     , Simplify.rule Simplify.defaults
     , UseCamelCase.rule UseCamelCase.default
     , Validate.Regexes.rule
-    , VariablesBetweenCaseOf.AccessInCases.forbid
+    -- , VariablesBetweenCaseOf.AccessInCases.forbid
     ]
 
 

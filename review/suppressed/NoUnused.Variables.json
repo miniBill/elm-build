@@ -3,7 +3,6 @@
   "automatically created by": "elm-review suppress",
   "learn more": "elm-review suppress --help",
   "suppressions": [
-    { "count": 7, "filePath": "src/Path/Utils.elm" },
     { "count": 1, "filePath": "src/Hash.elm" },
     { "count": 1, "filePath": "src/PathDict.elm" }
   ]

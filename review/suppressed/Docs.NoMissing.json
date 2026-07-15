@@ -3,7 +3,7 @@
   "automatically created by": "elm-review suppress",
   "learn more": "elm-review suppress --help",
   "suppressions": [
-    { "count": 19, "filePath": "src/Path/Posix.elm" },
+    { "count": 15, "filePath": "src/Path/Posix.elm" },
     { "count": 7, "filePath": "src/Build.elm" },
     { "count": 7, "filePath": "src/BuildTask/CommandOptions.elm" }
   ]

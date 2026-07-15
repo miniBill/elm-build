@@ -5,7 +5,6 @@
   "suppressions": [
     { "count": 7, "filePath": "src/BST.elm" },
     { "count": 6, "filePath": "src/BackendTask/Extra.elm" },
-    { "count": 2, "filePath": "src/BuildTask.elm" },
-    { "count": 1, "filePath": "src/Path/Utils.elm" }
+    { "count": 2, "filePath": "src/BuildTask.elm" }
   ]
 }

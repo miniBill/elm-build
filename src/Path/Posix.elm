@@ -22,12 +22,12 @@ module Path.Posix exposing
 
 ## Operations
 
-@docs append, replaceProperPrefix, parent, filename, dirname, splitExtension, fileExtension, replaceExtension, mapAbsoluteOrRelative, extractAbsoluteOrRelative, isPrefixOf
+@docs append, parent, filename, dirname, splitExtension, fileExtension, replaceExtension, mapAbsoluteOrRelative, extractAbsoluteOrRelative, isPrefixOf
 
 
 ## Parsing
 
-@docs parseAbsoluteDirectory, parseRelativeDirectory, parseAbsoluteFile, parseRelativeFile, parseAbsoluteFileOrDirectory, parseRelativeFileOrDirectory
+@docs parseAbsoluteDirectory, parseRelativeDirectory, parseAbsoluteFile, parseRelativeFile, parseRelativeFileOrDirectory
 
 
 ## Conversion
