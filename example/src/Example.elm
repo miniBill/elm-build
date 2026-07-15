@@ -469,6 +469,10 @@ processFile tools inputs total index ( path, copyFile ) =
                 |> ProcessedFont
                 |> Just
                 |> BuildTask.succeed
+
+        relativePath : Path Path.Relative Path.File
+        relativePath =
+            Path.relativeTo inputs.inputPath path
     in
     (case Path.fileExtension path of
         Just "webp" ->
@@ -513,8 +517,8 @@ processFile tools inputs total index ( path, copyFile ) =
             BuildTask.succeed Nothing
     )
         |> BuildTask.timed
-            ("Processing " ++ Path.toString path)
-            ("Processed  " ++ Path.toString path)
+            ("Processing " ++ Path.toString relativePath)
+            ("Processed  " ++ Path.toString relativePath)
         |> BuildTask.withPrefix prefix
 
 
