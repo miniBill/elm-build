@@ -261,6 +261,7 @@ inputs input_ inputPaths =
             , env = Dict.empty
             , idlePriority = False
             , debug = input_.debug
+            , buildPath = Path.root
             }
             "b3sum"
             (List.map Path.toString inputPaths)

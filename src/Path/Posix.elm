@@ -6,7 +6,7 @@ module Path.Posix exposing
     , append, parent, filename, dirname, splitExtension, fileExtension, replaceExtension, mapAbsoluteOrRelative, extractAbsoluteOrRelative, isPrefixOf
     , parseAbsoluteDirectory, parseRelativeDirectory, parseAbsoluteFile, parseRelativeFile, parseRelativeFileOrDirectory
     , toString, absoluteDirectoryToString, relativeDirectoryToString, absoluteFileToString, relativeFileToString
-    , relativeTo, splitDirectory, toFileOrDirectory
+    , relativeTo, splitDirectory, toFileOrDirectory, root
     )
 
 {-| Module for handling paths. The API is inspired by [path](https://hackage.haskell.org/package/path).
@@ -37,12 +37,12 @@ module Path.Posix exposing
 
 ## Utilities
 
-@docs relativeTo, splitDirectory, toFileOrDirectory
+@docs relativeTo, splitDirectory, toFileOrDirectory, root
 
 
 ## License notice
 
-Some of the code and documentation are derived from the `path` Haskell library, licensed under BSD-3-Clause:
+Some of the API and documentation are derived from the `path` Haskell library, licensed under BSD-3-Clause:
 
 Copyright (c) 2015–2018, FP Complete
 All rights reserved.
@@ -519,3 +519,10 @@ normalize splat =
             ( True, [] )
         |> Tuple.second
         |> List.reverse
+
+
+{-| The root path `/`.
+-}
+root : Path Absolute Directory
+root =
+    Path [ "", "" ]

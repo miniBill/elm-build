@@ -848,6 +848,7 @@ commandLogWith :
         , env : Dict String String
         , idlePriority : Bool
         , debug : Bool
+        , buildPath : Path Path.Absolute Path.Directory
     }
     -> CommandOptions
     -> String
