@@ -453,8 +453,23 @@ toFileOrDirectory (Path p) =
 
 
 relativeTo : Path base Directory -> Path base fileOrDirectory -> Path Relative fileOrDirectory
-relativeTo base fileOrDirectory =
-    Debug.todo ("Path.relativeTo " ++ toString base ++ " " ++ toString fileOrDirectory)
+relativeTo (Path base) (Path fileOrDirectory) =
+    case ( base, fileOrDirectory ) of
+        ( [], _ ) ->
+            Path fileOrDirectory
+
+        ( _, [] ) ->
+            Path [ "" ]
+
+        ( [ "" ], _ ) ->
+            Path fileOrDirectory
+
+        ( baseHead :: baseTail, fileHead :: fileTail ) ->
+            if baseHead == fileHead then
+                relativeTo (Path baseTail) (Path fileTail)
+
+            else
+                Debug.todo ("Path.relativeTo " ++ toString (Path base) ++ " " ++ toString (Path fileOrDirectory))
 
 
 splitAndNormalize : String -> List String
