@@ -147,7 +147,7 @@ derive path description target inner =
                     targetPath =
                         path.toPath buildPath target
                 in
-                Do.do (File.exists (Path.toString targetPath)) <| \exists ->
+                Do.do (BackendTask.File.Extra.exists targetPath) <| \exists ->
                 if exists && not input.check then
                     BackendTask.succeed ( target, { deps = newDeps, warnings = state.warnings } )
 
@@ -444,7 +444,7 @@ run :
             }
 run config buildPath m =
     Do.do
-        (Script.makeDirectory { recursive = True } (Path.toString buildPath)
+        (BackendTask.File.Extra.makeDirectory { recursive = True } buildPath
             |> BackendTask.mapError InternalError
         )
     <| \_ ->
@@ -459,6 +459,7 @@ run config buildPath m =
                         , env = Dict.empty
                         , idlePriority = False
                         , debug = config.debug
+                        , buildPath = buildPath
                         }
                     )
 
@@ -584,6 +585,7 @@ nproc :
         , env : Dict String String
         , idlePriority : Bool
         , debug : Bool
+        , buildPath : Path Path.Absolute Path.Directory
     }
     -> BackendTask FatalError Int
 nproc input =
@@ -806,6 +808,7 @@ commandLog :
         , env : Dict String String
         , idlePriority : Bool
         , debug : Bool
+        , buildPath : Path Path.Absolute Path.Directory
     }
     -> String
     -> List String
@@ -825,6 +828,7 @@ commandUnlogged :
         , env : Dict String String
         , idlePriority : Bool
         , debug : Bool
+        , buildPath : Path Path.Absolute Path.Directory
     }
     -> String
     -> List String
@@ -977,7 +981,19 @@ type WhenToLog
 
 
 {-| -}
-logCommand : WhenToLog -> { a | prefix : List String, env : Dict String String, debug : Bool, buildPath : Path Path.Absolute Path.Directory } -> String -> List String -> BackendTask error b -> BackendTask error b
+logCommand :
+    WhenToLog
+    ->
+        { a
+            | prefix : List String
+            , env : Dict String String
+            , debug : Bool
+            , buildPath : Path Path.Absolute Path.Directory
+        }
+    -> String
+    -> List String
+    -> BackendTask error b
+    -> BackendTask error b
 logCommand when { prefix, env, debug, buildPath } cmd args task =
     let
         log : Bool

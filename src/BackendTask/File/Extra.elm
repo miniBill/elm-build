@@ -46,7 +46,7 @@ removeIfExists filename =
         Do.noop
 
 
-exists : Path base kind -> BackendTask FatalError Bool
+exists : Path base kind -> BackendTask e Bool
 exists path =
     File.exists (Path.toString path)
 

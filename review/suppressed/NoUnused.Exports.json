@@ -6,7 +6,7 @@
     { "count": 25, "filePath": "src/BuildTask.elm" },
     { "count": 12, "filePath": "src/BuildTask/Do.elm" },
     { "count": 6, "filePath": "src/BuildTask/Unsafe.elm" },
-    { "count": 3, "filePath": "src/BackendTask/File/Extra.elm" },
+    { "count": 2, "filePath": "src/BackendTask/File/Extra.elm" },
     { "count": 2, "filePath": "src/PathDict.elm" },
     { "count": 1, "filePath": "src/BuildTask/Elm.elm" },
     { "count": 1, "filePath": "src/BuildTask/Font.elm" },
