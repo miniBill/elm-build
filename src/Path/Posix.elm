@@ -452,7 +452,7 @@ toFileOrDirectory (Path p) =
     Path p
 
 
-relativeTo : Path base Directory -> Path base2 fileOrDirectory -> Path Relative fileOrDirectory
+relativeTo : Path base Directory -> Path base fileOrDirectory -> Path Relative fileOrDirectory
 relativeTo base fileOrDirectory =
     Debug.todo ("Path.relativeTo " ++ toString base ++ " " ++ toString fileOrDirectory)
 
