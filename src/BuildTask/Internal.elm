@@ -977,20 +977,10 @@ type WhenToLog
 
 
 {-| -}
-logCommand : WhenToLog -> { a | prefix : List String, env : Dict String String, debug : Bool } -> String -> List String -> BackendTask error b -> BackendTask error b
-logCommand when { prefix, env, debug } cmd args task =
+logCommand : WhenToLog -> { a | prefix : List String, env : Dict String String, debug : Bool, buildPath : Path Path.Absolute Path.Directory } -> String -> List String -> BackendTask error b -> BackendTask error b
+logCommand when { prefix, env, debug, buildPath } cmd args task =
     let
-        label : String -> String
-        label i =
-            (prefix
-                ++ String.padLeft 7 ' ' i
-                :: Utils.viewEnv env
-                :: cmd
-                :: args
-            )
-                |> List.Extra.removeWhen String.isEmpty
-                |> String.join " "
-
+        log : Bool
         log =
             case when of
                 LogAlways ->
@@ -1000,10 +990,35 @@ logCommand when { prefix, env, debug } cmd args task =
                     debug
     in
     if log then
-        BackendTask.Extra.timed
-            (label "Running")
-            (label "Ran")
-            task
+        let
+            buildPathString : String
+            buildPathString =
+                Path.toString buildPath
+
+            buildPathLength : Int
+            buildPathLength =
+                String.length buildPathString
+
+            cleanArg : String -> String
+            cleanArg arg =
+                if String.startsWith buildPathString arg then
+                    "<build>/" ++ String.dropLeft buildPathLength arg
+
+                else
+                    arg
+
+            label : String -> String
+            label i =
+                (prefix
+                    ++ String.padLeft 7 ' ' i
+                    :: Utils.viewEnv env
+                    :: cmd
+                    :: List.map cleanArg args
+                )
+                    |> List.Extra.removeWhen String.isEmpty
+                    |> String.join " "
+        in
+        BackendTask.Extra.timed (label "Running") (label "Ran") task
 
     else
         task
