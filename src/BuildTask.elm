@@ -26,7 +26,7 @@ module BuildTask exposing
 
 ## Building blocks
 
-@docs Monad, do, doWithError, succeed, fail
+@docs do, doWithError, succeed, fail
 
 
 ## Output
@@ -34,7 +34,7 @@ module BuildTask exposing
 @docs writeFile, writeBytes, run
 
 
-## Transforming and combining `Monad` values
+## Transforming and combining `BuildTask` values
 
 @docs map, map2, map3, map4, map5, andMap, andThen, andThen2, combine, combineBy, combineInto, each, sequence, toResult, mapError, mapRecoverableError, allowFatal
 
@@ -373,11 +373,7 @@ buildTree files =
 
 dumpTree : Tree -> BuildTask e Tree
 dumpTree tree =
-    triggerDebugger
-        |> andThen
-            (\_ ->
-                dumpTreeHelp "-" tree
-            )
+    dumpTreeHelp "-" tree
 
 
 dumpTreeHelp : String -> Tree -> BuildTask e Tree
@@ -389,7 +385,7 @@ dumpTreeHelp prefix (Tree tree) =
                 |> PathDict.toList
                 |> List.map
                     (\( directory, child ) ->
-                        Internal.debugLog (prefix ++ Path.toString directory)
+                        Internal.debugLog (prefix ++ " " ++ Path.toString directory)
                             |> andThen (\_ -> dumpTreeHelp (prefix ++ "-") child)
                             |> map (\_ -> ())
                     )
@@ -401,7 +397,7 @@ dumpTreeHelp prefix (Tree tree) =
                 |> List.map (\( file, _ ) -> Path.toString file)
                 |> String.join ", "
     in
-    (directoriesLogs ++ [ Internal.debugLog (prefix ++ filesLogs) ])
+    (directoriesLogs ++ [ Internal.debugLog (prefix ++ " " ++ filesLogs) ])
         |> Internal.combineBy 1
         |> map (\_ -> Tree tree)
 
@@ -439,6 +435,7 @@ combineTree (Tree tree) =
                 |> String.join "|"
                 |> Internal.hashFromString
     in
+    do (Internal.debugLog (String.fromInt (PathDict.size combined))) <| \_ ->
     do outputHash <| \combinedHash ->
     Internal.deriveDirectory "combine" combinedHash <| \({ buildPath } as input_) target ->
     Do.do
@@ -449,7 +446,7 @@ combineTree (Tree tree) =
     combined
         |> PathDict.foldl
             (\outputFilename hash acc ->
-                Internal.execLog input_
+                Internal.execUnlogged input_
                     "cp"
                     [ "-rl"
                     , Path.toString (Hash.toFilePath buildPath hash)
@@ -459,6 +456,10 @@ combineTree (Tree tree) =
             )
             []
         |> BackendTask.Extra.combineBy_ parallelism
+        |> BackendTask.andThen
+            (\_ ->
+                Internal.logWithPrefix input_ ("Combined tree " ++ Path.toString (Path.relativeTo buildPath target))
+            )
         |> BackendTask.mapError Internal.InternalError
 
 

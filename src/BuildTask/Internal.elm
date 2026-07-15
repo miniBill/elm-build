@@ -1,4 +1,75 @@
-module BuildTask.Internal exposing (BuildTask(..), Command, DownloadError(..), Error(..), Input, State, Warning, allowFatal, andThen, andThen2, combineBy, commandLog, commandLogWith, debugLog, deriveDirectory, deriveFile, downloadSHA256, execLog, execUnlogged, extendHashWith, extractFromDirectory, fail, fatalToInternal, hashFromString, inputFile, isDebug, jobs, map, map2, map3, map4, map5, mapError, named, run, sequence, succeed, timed, toResult, triggerDebugger, which, withDebug, withEnv, withFile, withIdlePriority, withMemoryLimitInBytes, withPrefix, withWarning)
+module BuildTask.Internal exposing
+    ( BuildTask(..), Command, Error(..), Input, State
+    , downloadSHA256, inputFile, DownloadError(..)
+    , succeed, fail
+    , run
+    , map, map2, map3, map4, map5, andThen, andThen2, combineBy, sequence, toResult, mapError, allowFatal
+    , withFile, extractFromDirectory, deriveFile, deriveDirectory
+    , withPrefix, timed
+    , Warning, withWarning
+    , jobs, triggerDebugger, which, named, isDebug, hashFromString, extendHashWith, fatalToInternal
+    , commandLog, commandLogWith, execLog, execUnlogged, logWithPrefix, debugLog
+    , withEnv, withMemoryLimitInBytes, withDebug, withIdlePriority
+    )
+
+{-|
+
+
+## Types
+
+@docs BuildTask, Command, Error, Input, State
+
+
+## Input
+
+@docs downloadSHA256, inputFile, DownloadError
+
+
+## Building blocks
+
+@docs succeed, fail
+
+
+## Output
+
+@docs run
+
+
+## Transforming and combining `Monad` values
+
+@docs map, map2, map3, map4, map5, andThen, andThen2, combineBy, sequence, toResult, mapError, allowFatal
+
+
+## Operations
+
+@docs withFile, extractFromDirectory, deriveFile, deriveDirectory
+
+
+## Output control
+
+@docs withPrefix, timed
+
+
+## Warnings
+
+@docs Warning, withWarning
+
+
+## Utils
+
+@docs jobs, triggerDebugger, which, named, isDebug, hashFromString, extendHashWith, fatalToInternal
+
+
+## Logging
+
+@docs commandLog, commandLogWith, execLog, execUnlogged, logWithPrefix, debugLog
+
+
+## Advanced
+
+@docs withEnv, withMemoryLimitInBytes, withDebug, withIdlePriority
+
+-}
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Customs
@@ -1039,6 +1110,11 @@ logCommand when { prefix, env, debug, buildPath } cmd args task =
         task
 
 
+logWithPrefix : { a | prefix : List String } -> String -> BackendTask e ()
+logWithPrefix { prefix } msg =
+    Script.log (String.join " " prefix ++ " " ++ msg)
+
+
 named :
     String
     -> (a -> { files : List (Hash Normal), additionalData : List String })
@@ -1249,9 +1325,9 @@ isDebug =
 debugLog : String -> BuildTask e ()
 debugLog msg =
     BuildTask "debugLog"
-        (\{ debug } state ->
+        (\{ prefix, debug } state ->
             if debug then
-                Script.log msg
+                Script.log (String.join " " prefix ++ " " ++ msg)
                     |> BackendTask.map (\_ -> ( (), state ))
 
             else
