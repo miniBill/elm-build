@@ -1,4 +1,4 @@
-module PathDict exposing (PathDict, empty, foldl, fromList, get, insert, remove, union, update)
+module PathDict exposing (PathDict, empty, foldl, fromList, get, insert, remove, toList, union, update)
 
 import FastDict as Dict exposing (Dict)
 import Path.Posix as Path exposing (Path)
@@ -66,3 +66,8 @@ union :
     -> PathDict base kind v
 union (PathDict l) (PathDict r) =
     PathDict (Dict.union l r)
+
+
+toList : PathDict base kind v -> List ( Path base kind, v )
+toList (PathDict l) =
+    Dict.values l
