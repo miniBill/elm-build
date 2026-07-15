@@ -148,7 +148,7 @@ derive path description target inner =
                         path.toPath buildPath target
                 in
                 Do.do (File.exists (Path.toString targetPath)) <| \exists ->
-                if exists && not input.check && not input.debug then
+                if exists && not input.check then
                     BackendTask.succeed ( target, { deps = newDeps, warnings = state.warnings } )
 
                 else
