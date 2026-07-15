@@ -50,12 +50,12 @@ type alias Tools =
 
 
 type alias Inputs =
-    { files :
+    { inputPath : Path Path.Absolute Path.Directory
+    , files :
         List
-            ( Path Path.Relative Path.File
+            ( Path Path.Absolute Path.File
             , BuildTask FatalError FileOrDirectory
             )
-    , inputPath : Path Path.Absolute Path.Directory
     }
 
 
@@ -84,43 +84,51 @@ getInputs :
     }
     -> BackendTask FatalError Inputs
 getInputs config =
-    let
-        filesTask :
-            BackendTask
-                FatalError
-                (List ( Path Path.Relative Path.File, BuildTask e FileOrDirectory ))
-        filesTask =
-            Glob.fromStringWithOptions
-                (let
-                    defaultOptions : Glob.Options
-                    defaultOptions =
-                        Glob.defaultOptions
-                 in
-                 { defaultOptions | include = Glob.OnlyFiles }
-                )
-                (config.inputPath ++ "/**")
-                |> BackendTask.andThen
-                    (\found ->
-                        found
-                            |> List.sort
-                            |> Result.Extra.combineMap
-                                (\filename ->
-                                    case Path.parseRelativeFile filename of
-                                        Just file ->
-                                            Ok file
+    BackendTask.File.Extra.resolveDirectory config.inputPath
+        |> BackendTask.andThen
+            (\inputPath ->
+                let
+                    filesTask :
+                        BackendTask
+                            FatalError
+                            (List ( Path Path.Absolute Path.File, BuildTask e FileOrDirectory ))
+                    filesTask =
+                        Glob.fromStringWithOptions
+                            (let
+                                defaultOptions : Glob.Options
+                                defaultOptions =
+                                    Glob.defaultOptions
+                             in
+                             { defaultOptions | include = Glob.OnlyFiles }
+                            )
+                            (config.inputPath ++ "/**")
+                            |> BackendTask.andThen
+                                (\found ->
+                                    found
+                                        |> List.sort
+                                        |> Result.Extra.combineMap
+                                            (\filename ->
+                                                case Path.parseRelativeFile filename of
+                                                    Just file ->
+                                                        let
+                                                            _ =
+                                                                Debug.log "append"
+                                                                    { inputPath = inputPath
+                                                                    , file = file
+                                                                    }
+                                                        in
+                                                        Path.append inputPath file
+                                                            |> Ok
 
-                                        Nothing ->
-                                            Err (FatalError.fromString ("Invalid filename " ++ filename))
+                                                    Nothing ->
+                                                        Err (FatalError.fromString ("Invalid filename " ++ filename))
+                                            )
+                                        |> BackendTask.fromResult
                                 )
-                            |> BackendTask.fromResult
-                    )
-                |> BackendTask.andThen (BuildTask.inputs config)
-
-        inputPathTask : BackendTask FatalError (Path Path.Absolute Path.Directory)
-        inputPathTask =
-            BackendTask.File.Extra.resolveDirectory config.inputPath
-    in
-    BackendTask.map2 Inputs filesTask inputPathTask
+                            |> BackendTask.andThen (BuildTask.inputs config)
+                in
+                BackendTask.map (Inputs inputPath) filesTask
+            )
 
 
 type T4 a b c d
@@ -411,7 +419,7 @@ processFile :
     -> Int
     -> Int
     ->
-        ( Path Path.Relative Path.File
+        ( Path Path.Absolute Path.File
         , BuildTask FatalError FileOrDirectory
         )
     -> BuildTask FatalError (Maybe ProcessedFile)
