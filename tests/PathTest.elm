@@ -15,6 +15,7 @@ cases :
         }
 cases =
     let
+        absolutes : List { input : String, absDir : Maybe String, absFile : Maybe String }
         absolutes =
             [ { input = "", absDir = Nothing, absFile = Nothing }
 
@@ -31,6 +32,7 @@ cases =
             , { input = "/a/", absDir = Just "/a/", absFile = Nothing }
             ]
 
+        relatives : List { input : String, relDir : Maybe String, relFile : Maybe String }
         relatives =
             [ { input = "..", relDir = Just "../", relFile = Nothing }
             , { input = "../", relDir = Just "../", relFile = Nothing }

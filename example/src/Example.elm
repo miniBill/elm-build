@@ -1,6 +1,7 @@
 module Example exposing (HashedFileWith, Inputs, Tools, buildFile, image, standardFormats)
 
 import BackendTask exposing (BackendTask)
+import BackendTask.Customs
 import BackendTask.File.Extra
 import BackendTask.Glob as Glob
 import Build exposing (BuildFile)
@@ -101,24 +102,16 @@ getInputs config =
                              in
                              { defaultOptions | include = Glob.OnlyFiles }
                             )
-                            (config.inputPath ++ "/**")
+                            (Path.toString inputPath ++ "/**")
                             |> BackendTask.andThen
                                 (\found ->
                                     found
                                         |> List.sort
                                         |> Result.Extra.combineMap
                                             (\filename ->
-                                                case Path.parseRelativeFile filename of
+                                                case Path.parseAbsoluteFile filename of
                                                     Just file ->
-                                                        let
-                                                            _ =
-                                                                Debug.log "append"
-                                                                    { inputPath = inputPath
-                                                                    , file = file
-                                                                    }
-                                                        in
-                                                        Path.append inputPath file
-                                                            |> Ok
+                                                        Ok file
 
                                                     Nothing ->
                                                         Err (FatalError.fromString ("Invalid filename " ++ filename))
