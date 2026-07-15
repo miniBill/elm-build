@@ -122,9 +122,7 @@ derive path description target inner =
                 appendLog : BackendTask (Error e) ()
                 appendLog =
                     if input.debug then
-                        (Path.toString (Hash.toFilePath buildPath target)
-                            ++ ": "
-                            ++ description
+                        (Hash.toString target ++ ": " ++ description
                          -- ++ " from "
                          -- ++ (deps
                          --         |> HashSet.toList
