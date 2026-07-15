@@ -1,4 +1,4 @@
-module BuildTask.Internal exposing (BuildTask(..), Command, DownloadError(..), Error(..), Input, State, Warning, allowFatal, andThen, andThen2, combineBy, commandLog, commandLogWith, deriveDirectory, deriveFile, downloadSHA256, execLog, execUnlogged, extendHashWith, extractFromDirectory, fail, fatalToInternal, hashFromString, inputFile, jobs, map, map2, map3, map4, map5, mapError, named, run, sequence, succeed, timed, toResult, triggerDebugger, which, withDebug, withEnv, withFile, withIdlePriority, withMemoryLimitInBytes, withPrefix, withWarning)
+module BuildTask.Internal exposing (BuildTask(..), Command, DownloadError(..), Error(..), Input, State, Warning, allowFatal, andThen, andThen2, combineBy, commandLog, commandLogWith, debugLog, deriveDirectory, deriveFile, downloadSHA256, execLog, execUnlogged, extendHashWith, extractFromDirectory, fail, fatalToInternal, hashFromString, inputFile, isDebug, jobs, map, map2, map3, map4, map5, mapError, named, run, sequence, succeed, timed, toResult, triggerDebugger, which, withDebug, withEnv, withFile, withIdlePriority, withMemoryLimitInBytes, withPrefix, withWarning)
 
 import BackendTask exposing (BackendTask)
 import BackendTask.Customs
@@ -1239,3 +1239,21 @@ extractFromDirectory directory file =
                                         }
                                 )
             )
+
+
+isDebug : BuildTask e Bool
+isDebug =
+    BuildTask "isDebug" (\{ debug } state -> BackendTask.succeed ( debug, state ))
+
+
+debugLog : String -> BuildTask e ()
+debugLog msg =
+    BuildTask "debugLog"
+        (\{ debug } state ->
+            if debug then
+                Script.log msg
+                    |> BackendTask.map (\_ -> ( (), state ))
+
+            else
+                BackendTask.succeed ( (), state )
+        )
