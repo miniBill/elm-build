@@ -3,7 +3,7 @@ module Path.Posix exposing
     , Absolute, Relative, AbsoluteOrRelative
     , File, Directory, FileOrDirectory
     , AbsoluteOrRelativePath(..)
-    , append, parent, filename, dirname, splitExtension, fileExtension, replaceExtension, mapAbsoluteOrRelative, extractAbsoluteOrRelative
+    , append, parent, filename, dirname, splitExtension, fileExtension, replaceExtension, mapAbsoluteOrRelative, extractAbsoluteOrRelative, isPrefixOf
     , parseAbsoluteDirectory, parseRelativeDirectory, parseAbsoluteFile, parseRelativeFile, parseRelativeFileOrDirectory
     , toString, absoluteDirectoryToString, relativeDirectoryToString, absoluteFileToString, relativeFileToString
     , relativeTo, splitDirectory, toFileOrDirectory
@@ -22,7 +22,7 @@ module Path.Posix exposing
 
 ## Operations
 
-@docs append, replaceProperPrefix, parent, filename, dirname, splitExtension, fileExtension, replaceExtension, mapAbsoluteOrRelative, extractAbsoluteOrRelative
+@docs append, replaceProperPrefix, parent, filename, dirname, splitExtension, fileExtension, replaceExtension, mapAbsoluteOrRelative, extractAbsoluteOrRelative, isPrefixOf
 
 
 ## Parsing
@@ -429,22 +429,16 @@ extractAbsoluteOrRelative onAbs onRel path =
 
 
 splitDirectory : Path Relative Directory -> List (Path Relative Directory)
-splitDirectory p =
-    splitDirectoryHelp p []
+splitDirectory (Path p) =
+    p
+        |> List.filterMap
+            (\s ->
+                if String.isEmpty s then
+                    Nothing
 
-
-splitDirectoryHelp : Path Relative Directory -> List (Path Relative Directory) -> List (Path Relative Directory)
-splitDirectoryHelp p acc =
-    let
-        next : Path Relative Directory
-        next =
-            parent p
-    in
-    if next == p then
-        List.reverse acc
-
-    else
-        splitDirectoryHelp next (dirname p :: acc)
+                else
+                    Just (Path [ s, "" ])
+            )
 
 
 toFileOrDirectory : Path base kind -> Path base FileOrDirectory
@@ -452,14 +446,19 @@ toFileOrDirectory (Path p) =
     Path p
 
 
+isPrefixOf : Path base kind -> Path base Directory -> Bool
+isPrefixOf (Path child) (Path base) =
+    List.Extra.isPrefixOf child (base |> List.Extra.dropWhileRight String.isEmpty)
+
+
 relativeTo : Path base Directory -> Path base fileOrDirectory -> Path Relative fileOrDirectory
 relativeTo (Path base) (Path fileOrDirectory) =
     case ( base, fileOrDirectory ) of
         ( [], _ ) ->
-            Path fileOrDirectory
+            Debug.todo ("Path.relativeTo " ++ toString (Path base) ++ " " ++ toString (Path fileOrDirectory))
 
         ( _, [] ) ->
-            Path [ "" ]
+            Debug.todo ("Path.relativeTo " ++ toString (Path base) ++ " " ++ toString (Path fileOrDirectory))
 
         ( [ "" ], _ ) ->
             Path fileOrDirectory
