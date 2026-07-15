@@ -452,7 +452,15 @@ run config buildPath m =
     Do.do
         (case config.jobs of
             Nothing ->
-                BackendTask.mapError InternalError (nproc { memoryLimit = Nothing, prefix = [], env = Dict.empty, idlePriority = False, debug = config.debug })
+                BackendTask.mapError InternalError
+                    (nproc
+                        { memoryLimit = Nothing
+                        , prefix = []
+                        , env = Dict.empty
+                        , idlePriority = False
+                        , debug = config.debug
+                        }
+                    )
 
             Just j ->
                 BackendTask.succeed j
