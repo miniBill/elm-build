@@ -21,7 +21,7 @@ In particular, the command must not:
 
 -}
 pipeThrough :
-    String
+    BuildTask.Command
     -> List String
     -> FileOrDirectory
     -> (FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error () String } a)
@@ -44,7 +44,7 @@ In particular, the command must not:
 
 -}
 commandWithFile :
-    String
+    BuildTask.Command
     -> List String
     -> FileOrDirectory
     -> (FileOrDirectory -> BuildTask { fatal : FatalError, recoverable : Stream.Error Int String } a)
