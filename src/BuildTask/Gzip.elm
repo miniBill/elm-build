@@ -8,26 +8,26 @@ import FatalError exposing (FatalError)
 
 
 gzip :
-    FileOrDirectory
+    { tools | gzip : BuildTask.Command }
+    -> FileOrDirectory
     ->
         BuildTask
-            { tools | gzip : Command }
             { fatal : FatalError
             , recoverable : Stream.Error () String
             }
             FileOrDirectory
-gzip =
-    BuildTask.Unsafe.pipeThrough .gzip [ "-9" ]
+gzip tools =
+    BuildTask.Unsafe.pipeThrough tools.gzip [ "-9" ]
 
 
 gunzip :
-    FileOrDirectory
+    { tools | gzip : BuildTask.Command }
+    -> FileOrDirectory
     ->
         BuildTask
-            { tools | gzip : Command }
             { fatal : FatalError
             , recoverable : Stream.Error () String
             }
             FileOrDirectory
-gunzip =
-    BuildTask.Unsafe.pipeThrough .gzip [ "-d" ]
+gunzip tools =
+    BuildTask.Unsafe.pipeThrough tools.gzip [ "-d" ]
