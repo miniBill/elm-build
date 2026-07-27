@@ -8,7 +8,7 @@ import FatalError exposing (FatalError)
 
 
 gzip :
-    { tools | gzip : BuildTask.Command }
+    { tools | gzip : Command }
     -> FileOrDirectory
     ->
         BuildTask
@@ -21,7 +21,7 @@ gzip tools =
 
 
 gunzip :
-    { tools | gzip : BuildTask.Command }
+    { tools | gzip : Command }
     -> FileOrDirectory
     ->
         BuildTask

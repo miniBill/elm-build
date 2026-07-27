@@ -13,16 +13,17 @@ import Path.Posix as Path
 
 {-| List the contents of a tar file
 -}
-listContents : { tools | tar : BuildTask.Command } -> FileOrDirectory -> BuildTask FatalError (List String)
+listContents : { tools | tar : Command } -> FileOrDirectory -> BuildTask FatalError (List String)
 listContents { tar } tarFile =
-    BuildTask.do (BuildTask.Unsafe.pipeThrough tar [ "tf", "-" ] tarFile |> BuildTask.allowFatal) <| \contentsFile ->
-    BuildTask.withFile contentsFile (\raw -> BuildTask.succeed (String.split "\n" raw)) |> BuildTask.allowFatal
+    BuildTask.do (BuildTask.Unsafe.pipeThrough tar [ "tf", "-" ] tarFile |> BuildTask.allowFatal) <|
+        \contentsFile ->
+            BuildTask.withFile contentsFile (\raw -> BuildTask.succeed (String.split "\n" raw)) |> BuildTask.allowFatal
 
 
 {-| Extract files, optionally stripping a prefix. You don't need to specify the prefix in the list of files to extract.
 -}
 extract :
-    { tools | tar : BuildTask.Command }
+    { tools | tar : Command }
     -> { stripPrefix : Maybe String }
     -> FileOrDirectory
     -> List String
@@ -39,20 +40,23 @@ extract { tar } { stripPrefix } input files =
                     , "--strip-components" :: String.fromInt (1 + List.length (String.indexes "/" prefix)) :: List.map (\file -> prefix ++ "/" ++ file) files
                     )
     in
-    BuildTask.do outputHashTask <| \outputHash ->
-    Internal.deriveDirectory "tar xf" outputHash <| \({ buildPath } as input_) target ->
-    BackendTask.Do.do
-        (BackendTask.File.Extra.makeDirectory { recursive = True } target
-            |> BackendTask.mapError Internal.InternalError
-        )
-    <| \() ->
-    Internal.execLog input_
-        tar.name
-        ([ "xf"
-         , Path.toString (Hash.toFilePath buildPath input)
-         , "-C"
-         , Path.toString target
-         ]
-            ++ filesArgs
-        )
-        |> BackendTask.mapError Internal.UserError
+    BuildTask.do outputHashTask <|
+        \outputHash ->
+            Internal.deriveDirectory "tar xf" outputHash <|
+                \({ buildPath } as input_) target ->
+                    BackendTask.Do.do
+                        (BackendTask.File.Extra.makeDirectory { recursive = True } target
+                            |> BackendTask.mapError Internal.InternalError
+                        )
+                    <|
+                        \() ->
+                            Internal.execLog input_
+                                tar.name
+                                ([ "xf"
+                                 , Path.toString (Hash.toFilePath buildPath input)
+                                 , "-C"
+                                 , Path.toString target
+                                 ]
+                                    ++ filesArgs
+                                )
+                                |> BackendTask.mapError Internal.UserError
