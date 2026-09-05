@@ -10,6 +10,7 @@ module BuildTask.Internal exposing
     , jobs, triggerDebugger, which, named, isDebug, hashFromString, extendHashWith, fatalToInternal
     , commandLog, commandLogWith, execLog, execUnlogged, logWithPrefix, debugLog
     , withEnv, withMemoryLimitInBytes, withDebug, withIdlePriority
+    , withFileFatal
     )
 
 {-|
@@ -488,6 +489,23 @@ withFile hash f =
         (\({ buildPath } as input) state ->
             Do.do
                 (BackendTask.File.Extra.read (Hash.toFilePath buildPath hash)
+                    |> BackendTask.mapError UserError
+                )
+            <| \raw ->
+            runMonad (f raw) input { deps = HashSet.insert hash state.deps, warnings = state.warnings }
+        )
+
+
+withFileFatal :
+    Hash Normal
+    -> (String -> BuildTask FatalError a)
+    -> BuildTask FatalError a
+withFileFatal hash f =
+    BuildTask "withFileFatal"
+        (\({ buildPath } as input) state ->
+            Do.do
+                (BackendTask.File.Extra.read (Hash.toFilePath buildPath hash)
+                    |> BackendTask.allowFatal
                     |> BackendTask.mapError UserError
                 )
             <| \raw ->

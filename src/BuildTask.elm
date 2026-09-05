@@ -9,6 +9,7 @@ module BuildTask exposing
     , Warning, withWarning, withWarnings
     , jobs, triggerDebugger, fromResult, which
     , withEnv, withMemoryLimitInMB, withMemoryLimitInGB, withDebug, withIdlePriority
+    , withFileFatal
     )
 
 {-|
@@ -485,6 +486,15 @@ withFile :
     -> BuildTask { fatal : FatalError, recoverable : File.FileReadError decoderError } a
 withFile hash f =
     Internal.withFile hash f
+
+
+{-| -}
+withFileFatal :
+    FileOrDirectory
+    -> (String -> BuildTask FatalError a)
+    -> BuildTask FatalError a
+withFileFatal hash f =
+    Internal.withFileFatal hash f
 
 
 {-| -}

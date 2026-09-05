@@ -1,4 +1,4 @@
-module Build exposing (BuildFile, Config, HashKind, customProgramConfig, programConfig, toTask)
+module Build exposing (BuildFile, Config, HashKind, customProgramConfig, fastHash, programConfig, secureHash, toTask)
 
 import Ansi.Color
 import BackendTask exposing (BackendTask)

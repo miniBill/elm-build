@@ -7,6 +7,7 @@ module Path.Posix exposing
     , parseAbsoluteDirectory, parseRelativeDirectory, parseAbsoluteFile, parseRelativeFile, parseRelativeFileOrDirectory
     , toString, absoluteDirectoryToString, relativeDirectoryToString, absoluteFileToString, relativeFileToString
     , relativeTo, splitDirectory, toFileOrDirectory, root
+    , replace
     )
 
 {-| Module for handling paths. The API is inspired by [path](https://hackage.haskell.org/package/path).
@@ -531,3 +532,12 @@ normalize splat =
 root : Path Absolute Directory
 root =
     Path [ "", "" ]
+
+
+{-| Replace a string in a path. The order of arguments is the same as `String.replace`.
+-}
+replace : String -> String -> Path base kind -> Path base kind
+replace before after (Path path) =
+    path
+        |> List.map (\segment -> String.replace before after segment)
+        |> Path
